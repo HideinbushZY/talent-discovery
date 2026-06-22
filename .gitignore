@@ -1,0 +1,17 @@
+# secrets — never commit real keys
+.env
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# os
+.DS_Store
+
+# local editor / tooling config (machine-specific)
+.claude/
+
+# runtime cache
+.cache/

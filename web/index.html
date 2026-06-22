@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>从问题出发的人才发现</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .spin { animation: spin 0.9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .fade-in { animation: fade 0.35s ease; }
+    @keyframes fade { from { opacity: 0; transform: translateY(6px);} to {opacity:1; transform:none;} }
+    .scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+  <div class="max-w-5xl mx-auto px-5 py-8">
+
+    <!-- Header -->
+    <header class="mb-7">
+      <h1 class="text-2xl font-semibold text-slate-900 flex items-center gap-2">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+        从问题出发的人才发现
+      </h1>
+      <p class="text-slate-500 mt-1.5 text-sm leading-relaxed">
+        输入一个<b class="text-slate-700">企业的难题</b>，系统把它翻译成可检索信号，在 GitHub（动手实现者）和 X（前沿话语权者）两个渠道
+        <b class="text-slate-700">诚实地</b>并行找人——没有对应人才的通道会如实跳过并说明。
+      </p>
+    </header>
+
+    <!-- Search box -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-5">
+      <textarea id="problem" rows="2" placeholder="例如：我们的 RAG 系统在 1 亿+ 向量规模下检索太慢。"
+        class="w-full resize-none border border-slate-200 rounded-lg px-3.5 py-2.5 text-[15px] focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"></textarea>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button id="go" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition flex items-center gap-2">
+          <span id="go-label">找人</span>
+        </button>
+        <span class="text-xs text-slate-400 ml-1">试试：</span>
+        <button class="example text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-2.5 py-1 rounded-md transition" data-q="我们的 RAG 系统在 1 亿+ 向量规模下检索太慢。">技术·向量检索</button>
+        <button class="example text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-2.5 py-1 rounded-md transition" data-q="我们的品牌在年轻用户里没有辨识度、缺记忆点。">营销·品牌辨识度</button>
+        <button class="example text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-2.5 py-1 rounded-md transition" data-q="我们远程团队跨时区协作效率低、交付总延期。">管理·远程协作</button>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div id="progress" class="hidden bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-5">
+      <div class="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+        <svg class="spin w-4 h-4 text-emerald-500" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" stroke-dasharray="42" stroke-linecap="round"/></svg>
+        <span id="progress-title">正在搜索…</span>
+        <span id="progress-timer" class="text-xs text-slate-400 font-normal ml-auto">0s</span>
+      </div>
+      <div id="progress-log" class="text-xs text-slate-500 space-y-1 max-h-44 overflow-y-auto scrollbar font-mono"></div>
+    </div>
+
+    <!-- Error -->
+    <div id="error" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-5 text-sm"></div>
+
+    <!-- Results -->
+    <div id="results" class="hidden">
+
+      <!-- Analysis header -->
+      <div id="analysis" class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 fade-in"></div>
+
+      <!-- Experimental banner -->
+      <div id="exp-banner" class="hidden bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 mb-4 text-sm flex items-start gap-2">
+        <span class="font-bold">实验性</span>
+        <span id="exp-text"></span>
+      </div>
+
+      <!-- Channel reports -->
+      <div id="channels" class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4"></div>
+
+      <!-- Plan (collapsible) -->
+      <details class="bg-white rounded-xl border border-slate-200 shadow-sm mb-4 group">
+        <summary class="cursor-pointer select-none px-4 py-3 text-sm font-medium text-slate-700 flex items-center gap-2">
+          <svg class="w-4 h-4 text-slate-400 group-open:rotate-90 transition" viewBox="0 0 20 20" fill="currentColor"><path d="M7 5l6 5-6 5V5z"/></svg>
+          检索计划（子问题 / 种子仓库 / 关键词）
+        </summary>
+        <div id="plan" class="px-4 pb-4 text-sm text-slate-600 space-y-2"></div>
+      </details>
+
+      <!-- Controls -->
+      <div class="flex flex-wrap items-center gap-3 mb-3">
+        <h2 class="text-lg font-semibold text-slate-900 mr-auto">融合总榜 <span id="count" class="text-sm font-normal text-slate-400"></span></h2>
+        <select id="filter-source" class="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
+          <option value="all">全部来源</option>
+          <option value="github">仅 GitHub</option>
+          <option value="x">仅 X</option>
+        </select>
+        <select id="filter-strength" class="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
+          <option value="all">全部证据强度</option>
+          <option value="hard">hard（硬证据）</option>
+          <option value="medium">medium</option>
+          <option value="soft">soft（软证据）</option>
+        </select>
+        <select id="sort" class="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
+          <option value="score">按契合度</option>
+          <option value="source">按来源</option>
+          <option value="strength">按证据强度</option>
+        </select>
+      </div>
+
+      <!-- Leaderboard -->
+      <div id="list" class="space-y-2.5"></div>
+    </div>
+  </div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let state = { candidates: [], result: null };
+let timerInt = null, t0 = 0, es = null;
+
+const SOURCE_BADGE = {
+  github: '<span class="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-800 text-white"><svg class="w-3 h-3" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</span>',
+  x: '<span class="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-black text-white"><svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M18.9 1.15h3.68l-8.04 9.19L24 22.85h-7.41l-5.8-7.58-6.64 7.58H.46l8.6-9.83L0 1.15h7.59l5.24 6.93 6.07-6.93zm-1.29 19.5h2.04L6.49 3.24H4.3L17.61 20.65z"/></svg>X</span>'
+};
+const STRENGTH = {
+  hard:   '<span class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700">硬证据</span>',
+  medium: '<span class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-amber-100 text-amber-700">中等证据</span>',
+  soft:   '<span class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-500">软证据</span>'
+};
+const HIRE = {
+  high:   '<span class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-sky-100 text-sky-700">可挖性高</span>',
+  medium: '<span class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-500">可挖性中</span>',
+  low:    '<span class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-400">可挖性低</span>'
+};
+const CAT = { technical: '技术', marketing: '营销', other: '经营/管理/其他' };
+
+function esc(s){ return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function startSearch(){
+  const p = $('#problem').value.trim();
+  if(!p) return;
+  if(es) es.close();
+  state = { candidates: [], result: null };
+  $('#results').classList.add('hidden');
+  $('#error').classList.add('hidden');
+  $('#progress').classList.remove('hidden');
+  $('#progress-log').innerHTML = '';
+  $('#go').disabled = true; $('#go-label').textContent = '搜索中…';
+  t0 = Date.now();
+  timerInt = setInterval(()=>{ $('#progress-timer').textContent = Math.round((Date.now()-t0)/1000)+'s'; }, 500);
+
+  es = new EventSource('/api/search/stream?problem=' + encodeURIComponent(p));
+  es.onmessage = (e) => {
+    const ev = JSON.parse(e.data);
+    if(ev.type === 'status'){ logLine('▶ ' + ev.message, 'text-slate-700'); $('#progress-title').textContent = ev.message; }
+    else if(ev.type === 'progress'){ logLine('  · ['+ev.channel+'] ' + ev.message, 'text-slate-400'); }
+    else if(ev.type === 'analysis'){ logLine('  ✓ 已分型：' + ev.data.domain, 'text-emerald-600'); }
+    else if(ev.type === 'done'){ finish(ev.result); }
+    else if(ev.type === 'error'){ showError(ev.message); }
+    else if(ev.type === 'close'){ cleanup(); }
+  };
+  es.onerror = () => { /* stream end or network */ cleanup(); };
+}
+
+function logLine(txt, cls){
+  const d = document.createElement('div');
+  d.className = cls || '';
+  d.textContent = txt;
+  $('#progress-log').appendChild(d);
+  $('#progress-log').scrollTop = $('#progress-log').scrollHeight;
+}
+function cleanup(){
+  if(es){ es.close(); es = null; }
+  if(timerInt){ clearInterval(timerInt); timerInt = null; }
+  $('#go').disabled = false; $('#go-label').textContent = '找人';
+}
+function showError(msg){
+  cleanup();
+  $('#progress').classList.add('hidden');
+  $('#error').textContent = '出错了：' + msg;
+  $('#error').classList.remove('hidden');
+}
+
+function finish(result){
+  cleanup();
+  $('#progress').classList.add('hidden');
+  state.result = result;
+  state.candidates = result.candidates || [];
+  renderAnalysis(result);
+  renderChannels(result);
+  renderPlan(result);
+  $('#exp-banner').classList.toggle('hidden', result.maturity !== 'experimental');
+  if(result.maturity === 'experimental'){
+    const expNote = (result.notes||[]).find(n => n.includes('实验性')) || '这类难题目前主要靠 X 的软证据，结果可能偏弱，仅供参考。';
+    $('#exp-text').textContent = expNote.replace(/^实验性[:：]?\s*/, '');
+  }
+  renderList();
+  $('#results').classList.remove('hidden');
+}
+
+function renderAnalysis(r){
+  const elapsed = r.meta?.elapsed_sec, model = (r.meta?.model||'').split('.').pop();
+  $('#analysis').innerHTML = `
+    <div class="flex items-start justify-between gap-3 flex-wrap">
+      <div>
+        <div class="text-xs text-slate-400 mb-0.5">难题领域</div>
+        <div class="text-lg font-semibold text-slate-900">${esc(r.domain)}</div>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-xs font-medium px-2.5 py-1 rounded-md bg-indigo-100 text-indigo-700">${CAT[r.category]||r.category}</span>
+        <span class="text-xs font-medium px-2.5 py-1 rounded-md ${r.maturity==='well_supported'?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'}">${r.maturity==='well_supported'?'完整支持':'实验性'}</span>
+      </div>
+    </div>
+    <div class="text-xs text-slate-400 mt-3 flex gap-4 flex-wrap">
+      <span>⏱ ${elapsed}s</span>
+      <span>🧠 ${esc(model)}</span>
+      <span>📖 X 读取 ${r.meta?.x_reads_used||0} 条</span>
+      <span>候选池 ${r.meta?.total_candidates||0} 人 → 总榜 ${state.candidates.length}</span>
+    </div>`;
+}
+
+function renderChannels(r){
+  const box = $('#channels'); box.innerHTML = '';
+  (r.channel_reports||[]).forEach(cr => {
+    const ok = cr.applicable && !cr.error;
+    const head = SOURCE_BADGE[cr.channel];
+    const statusColor = !cr.applicable ? 'text-slate-400' : (cr.error ? 'text-red-500' : 'text-emerald-600');
+    const statusTxt = !cr.applicable ? '已跳过' : (cr.error ? '出错' : `${cr.collected} 人`);
+    box.innerHTML += `
+      <div class="bg-white rounded-xl border ${cr.applicable?'border-slate-200':'border-dashed border-slate-300 bg-slate-50/60'} p-3.5">
+        <div class="flex items-center justify-between mb-1.5">
+          <div class="flex items-center gap-2">${head}
+            ${cr.applicable?`<span class="text-[11px] text-slate-400">权重 ${(cr.weight*100).toFixed(0)}%</span>`:''}
+          </div>
+          <span class="text-xs font-medium ${statusColor}">${statusTxt}</span>
+        </div>
+        <p class="text-xs leading-relaxed ${cr.applicable?'text-slate-500':'text-slate-500'}">${esc(cr.note || cr.reason || '')}</p>
+      </div>`;
+  });
+}
+
+function renderPlan(r){
+  const p = r.meta?.plan || {}; const gh = p.github||{}, x = p.x||{};
+  const chips = (arr, cls) => (arr||[]).map(s=>`<span class="inline-block text-[11px] px-2 py-0.5 rounded ${cls} mr-1 mb-1">${esc(s)}</span>`).join('') || '<span class="text-xs text-slate-300">—</span>';
+  $('#plan').innerHTML = `
+    <div><span class="text-xs font-medium text-slate-500">子问题：</span><div class="mt-1">${chips(r.subproblems,'bg-indigo-50 text-indigo-600')}</div></div>
+    ${gh.applicable?`<div><span class="text-xs font-medium text-slate-500">GitHub 种子仓库：</span><div class="mt-1">${chips(gh.seed_repos,'bg-slate-100 text-slate-600')}</div></div>
+    <div><span class="text-xs font-medium text-slate-500">代码搜索词：</span><div class="mt-1">${chips(gh.code_search_queries,'bg-slate-100 text-slate-600')}</div></div>`:''}
+    ${x.applicable?`<div><span class="text-xs font-medium text-slate-500">X 关键词：</span><div class="mt-1">${chips(x.keywords,'bg-sky-50 text-sky-600')}</div></div>`:''}`;
+}
+
+function renderList(){
+  let cs = state.candidates.slice();
+  const fs = $('#filter-source').value, fst = $('#filter-strength').value, sort = $('#sort').value;
+  if(fs!=='all') cs = cs.filter(c=>c.source===fs);
+  if(fst!=='all') cs = cs.filter(c=>c.evidence_strength===fst);
+  const order = {hard:0,medium:1,soft:2};
+  const ws = (c)=> (c.weighted_score!=null && c.weighted_score>0) ? c.weighted_score : c.problem_fit_score;
+  if(sort==='source') cs.sort((a,b)=> a.source.localeCompare(b.source) || ws(b)-ws(a));
+  else if(sort==='strength') cs.sort((a,b)=> order[a.evidence_strength]-order[b.evidence_strength] || ws(b)-ws(a));
+  else cs.sort((a,b)=> ws(b)-ws(a));  // 融合总榜：按跨渠道加权分排序
+
+  $('#count').textContent = `· ${cs.length} 人`;
+  $('#list').innerHTML = cs.map((c,i)=>card(c,i+1)).join('') ||
+    '<div class="text-sm text-slate-400 py-8 text-center">没有符合筛选条件的候选。</div>';
+}
+
+function card(c, rank){
+  const name = esc(c.name || c.handle || '匿名');
+  const sub = c.handle && c.name ? '@'+esc(c.handle) : '';
+  const avatar = c.avatar_url
+    ? `<img src="${esc(c.avatar_url)}" class="w-11 h-11 rounded-full object-cover bg-slate-100" loading="lazy" onerror="this.style.display='none'">`
+    : `<div class="w-11 h-11 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 text-sm font-medium">${name.slice(0,1)}</div>`;
+  const ev = (c.evidence||[]).map(e=>{
+    const metric = e.metric ? `<span class="text-slate-400 ml-1">· ${esc(e.metric)}</span>` : '';
+    return e.url
+      ? `<a href="${esc(e.url)}" target="_blank" rel="noopener" class="block text-xs text-slate-500 hover:text-emerald-600 truncate">↗ ${esc(e.description)}${metric}</a>`
+      : `<div class="text-xs text-slate-500 truncate">· ${esc(e.description)}${metric}</div>`;
+  }).join('');
+  const contact = c.contact_hint ? `<span class="text-[11px] text-slate-400">✉ ${esc(c.contact_hint)}</span>` : '';
+  const loc = c.location ? `<span class="text-[11px] text-slate-400">📍 ${esc(c.location)}</span>` : '';
+  const hireReasons = esc((c.hireability?.reasons||[]).join('；'));
+
+  return `
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 fade-in hover:border-slate-300 transition">
+    <div class="flex gap-3.5">
+      <div class="flex flex-col items-center gap-1 pt-0.5 w-7 shrink-0">
+        <span class="text-sm font-semibold text-slate-400">#${rank}</span>
+      </div>
+      ${avatar}
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2 flex-wrap min-w-0">
+            <a href="${esc(c.profile_url||'#')}" target="_blank" rel="noopener" class="font-medium text-slate-900 hover:text-emerald-600 truncate">${name}</a>
+            <span class="text-xs text-slate-400">${sub}</span>
+            ${SOURCE_BADGE[c.source]}
+          </div>
+          <div class="flex items-center gap-1.5">
+            <div class="text-right">
+              <div class="text-xl font-bold leading-none ${c.problem_fit_score>=70?'text-emerald-600':c.problem_fit_score>=45?'text-amber-600':'text-slate-400'}">${c.problem_fit_score}</div>
+              <div class="text-[10px] text-slate-400 mt-0.5">契合度</div>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+          ${STRENGTH[c.evidence_strength]||''}
+          ${HIRE[c.hireability?.level]||''}
+          ${loc} ${contact}
+        </div>
+        <p class="text-sm text-slate-600 mt-2 leading-relaxed">${esc(c.why_relevant)}</p>
+        <div class="mt-2 space-y-0.5">${ev}</div>
+        ${hireReasons?`<div class="text-[11px] text-slate-400 mt-1.5">可挖性信号：${hireReasons}</div>`:''}
+        ${c.subscores?`<div class="text-[11px] text-slate-300 mt-1">相关性 ${c.subscores.relevance} · ${c.source==='github'?'贡献深度':'影响力'} ${c.subscores.depth_or_influence} · 活跃 ${c.subscores.recency}</div>`:''}
+      </div>
+    </div>
+  </div>`;
+}
+
+// events
+$('#go').addEventListener('click', startSearch);
+$('#problem').addEventListener('keydown', (e)=>{ if((e.metaKey||e.ctrlKey) && e.key==='Enter') startSearch(); });
+document.querySelectorAll('.example').forEach(b=> b.addEventListener('click', ()=>{ $('#problem').value = b.dataset.q; startSearch(); }));
+['filter-source','filter-strength','sort'].forEach(id=> $('#'+id).addEventListener('change', renderList));
+</script>
+</body>
+</html>

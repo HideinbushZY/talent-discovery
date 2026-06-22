@@ -1,0 +1,129 @@
+# 从问题出发的人才发现 (Talent Discovery, v1 Demo)
+
+输入一个**企业的难题**，系统把它翻译成可检索的信号，在 **GitHub**（动手实现/构建过这类问题的人）和 **X / Twitter**（在这类问题上最前沿、最有话语权的人）两个渠道**诚实地**并行找人，产出一个**融合总榜 dashboard**——没有对应人才的通道会如实跳过并说明。
+
+全程**实时**调用：GitHub REST/Code Search + X API v2 + Kimi（Moonshot）。
+
+---
+
+## 快速开始
+
+```bash
+cd talent-discovery
+cp .env.example .env        # 填入你的密钥（见下）
+./run.sh                    # 首次会自动建 venv + 装依赖
+# 打开 http://127.0.0.1:8848
+```
+
+手动方式：
+
+```bash
+python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
+./.venv/bin/uvicorn app.main:app --reload --port 8848
+```
+
+---
+
+## 公网部署（Railway）
+
+部署后会得到一个 `https://<your-app>.up.railway.app` 地址。
+访问受 **HTTP Basic Auth** 保护（用户名任意，密码 = Railway 变量 `APP_PASSWORD`）。
+
+部署要点：
+- 启动命令在 `Procfile`（`uvicorn app.main:app --host 0.0.0.0 --port $PORT`）；`.python-version` 锁 3.11。
+- 密钥与口令**只存在 Railway service 变量里**，不进 git / 不进镜像（`.railwayignore` 排除 `.env`、`.venv`）。
+- 公网防滥用：`APP_PASSWORD` 口令门 + 进程级 `X_SESSION_READ_CAP` + 线上 `X_READ_BUDGET=150`（约 $0.75/次）。
+
+重新部署 / 改配置：
+```bash
+railway up -y                      # 重新部署当前目录
+railway variables --set "APP_PASSWORD=新口令"   # 改口令（会触发重部署）
+railway redeploy -y                # 仅用新变量重启（不重建）
+railway down                       # 下线（删除部署）
+```
+> 注意：用 `--skip-deploys` 设变量后，必须 `railway redeploy` 才会把变量注入运行容器。
+
+---
+
+## 密钥（`.env`，本地开发用）
+
+| 变量 | 用途 | 获取 |
+|---|---|---|
+| `GITHUB_TOKEN` | 读公开数据 + 代码搜索（5000/hr） | GitHub → Settings → Developer settings → Personal access tokens（fine-grained：Public Repositories read-only 即可） |
+| `X_API_BEARER_TOKEN` | X v2 推文搜索（按量付费 $0.005/读） | console.x.com → 创建 App → Keys and tokens → Bearer Token（**保持控制台显示的 URL 编码原样**，含 `%2B`/`%3D`） |
+| `KIMI_API_KEY` | Kimi / Moonshot LLM 认证（sk- 开头） | platform.moonshot.cn → API Keys |
+| `KIMI_BASE_URL` | OpenAI 兼容接口地址 | `https://api.moonshot.cn/v1`（国际站 `.ai`） |
+| `KIMI_MODEL` | 模型名 | 当前 `kimi-k2.6`（也可 `kimi-k2.5` / `moonshot-v1-128k`） |
+| `APP_PASSWORD` | 公网访问口令（用户名任意/密码=此值） | 自定义；公网部署必填 |
+| `X_READ_BUDGET` | 每次搜索 X 读取上限（先小后大） | 默认 `300` |
+| `TOP_N_PER_CHANNEL` | 每通道进入评分的候选数 | 默认 `40` |
+
+> 注意：`kimi-k2.6` 默认开启 thinking，与强制具名 tool_choice 不兼容，故 LLM 层用 JSON 输出模式约束结构（见 `app/llm.py`）。
+> 健康检查：`curl -u u:口令 localhost:8848/api/health` 会返回脱敏配置 + 探测到的模型，便于排错。
+
+---
+
+## 它怎么工作（四阶段管线）
+
+```
+难题(自然语言)
+  → [1] 难题理解：分型 + 成熟度 + 逐通道适用性 + 检索计划   (Kimi / JSON 结构化输出)
+  → [2] 双渠道并行采集（只跑 applicable 的通道）
+        ├ GitHub: 核心 repo 贡献排名 + 相关模块提交 + 全网代码搜索 → 去重到"人"
+        └ X:      话题相关近期帖 → 聚合高影响力/高互动作者（硬性读取预算）
+  → [3] 评分与画像：0-100 问题契合度 + 证据强度(hard/soft) + 可挖性 + 一句 why  (Kimi 复核 + 打分函数)
+  → [4] 融合总榜 Dashboard（统一排名 + 来源徽章 + 逐通道诚实说明 + 实验性提示）
+```
+
+**诚实路由**：不预设哪个通道该有人。纯品牌/创意营销、纯管理类难题，GitHub 通常 `applicable=false`，dashboard 会显示"这儿没有能解决它的人才，已跳过"。技术/营销=完整支持；经营/业务/管理=实验性（挂提示条）。
+
+**评分**（两渠道归一到同一把尺子，再按通道权重轻度加权）：
+- GitHub: `100 ×(0.50×相关性 + 0.35×贡献深度 + 0.15×活跃度)`，代码贡献=hard 证据
+- X: `100 ×(0.50×话题相关性 + 0.35×影响力互动 + 0.15×活跃度)`，观点/影响力=soft 证据
+- 诚实标注：渠道内排名比跨渠道绝对分更可靠（权重为配置项）。
+
+---
+
+## API
+
+- `GET /` — 单页前端（零构建）
+- `GET /api/search/stream?problem=...` — **SSE** 实时回传进度 + 最终结果（前端用）
+- `POST /api/search {"problem": "..."}` — 非流式，跑完返回完整 JSON（脚本/测试用）
+- `GET /api/health` — 配置 + 模型自检
+
+候选人统一 schema 见 `app/models.py`（`Candidate`）。
+
+---
+
+## 成本（一次搜索）
+
+| 项 | 估算 |
+|---|---|
+| GitHub | $0 |
+| X（≤300 读） | 约 $0.5–1.5（先用小预算 `X_READ_BUDGET=60` 跑通） |
+| Kimi（Moonshot，分型 + 两批复核画像） | 约 $0.02–0.2（按 Moonshot 计费） |
+
+---
+
+## 代码结构
+
+```
+app/
+  main.py          FastAPI：SSE / POST / health / 静态
+  pipeline.py      四阶段编排（异步生成器，流式进度）
+  llm.py           Kimi/Moonshot（OpenAI 兼容，JSON 模式）：分型路由 + 相关性复核 + 画像
+  config.py        .env 读取 + 成本/范围配置
+  models.py        统一 pydantic schema
+  scoring.py       打分函数 + 可挖性启发式
+  cache.py         TTL 缓存 + 限速 + 限并发
+  connectors/
+    base.py        通道连接器接口（可插拔，便于加 LinkedIn/Substack…）
+    github.py      GitHubConnector（混合策略）
+    x.py           XConnector（读取预算 + 聚合作者）
+web/
+  index.html       Tailwind CDN + 原生 JS 的融合总榜 dashboard
+```
+
+## v1 不做（后续迭代）
+
+新通道（LinkedIn / Substack / HF / arXiv）、跨渠道身份打通（GitHub↔X 同一人合并）、outreach 草稿、候选保存与追踪、权重可视化调参。架构已为新通道预留可插拔 connector 接口。
