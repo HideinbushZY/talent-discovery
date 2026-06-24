@@ -23,6 +23,13 @@ class Hireability(BaseModel):
     reasons: List[str] = Field(default_factory=list)
 
 
+class ChinaFit(BaseModel):
+    """中国契合度（启发式）：中文能力 / 地理时区 / 中国市场经验。非族裔推断。"""
+    level: Literal["high", "medium", "low"] = "low"
+    score: float = 0.0
+    reasons: List[str] = Field(default_factory=list)
+
+
 class Subscores(BaseModel):
     relevance: float = 0.0
     depth_or_influence: float = 0.0
@@ -48,6 +55,7 @@ class Candidate(BaseModel):
     why_relevant: str = ""
     evidence: List[Evidence] = Field(default_factory=list)
     hireability: Hireability = Field(default_factory=Hireability)
+    china_fit: ChinaFit = Field(default_factory=ChinaFit)
     contact_hint: Optional[str] = None
 
     # 内部排序辅助（不一定展示）

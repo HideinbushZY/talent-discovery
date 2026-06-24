@@ -65,6 +65,36 @@ def test_hireability_contact_bumps_high(make_gh_cand):
     assert scoring.hireability(c)["level"] == "high"
 
 
+def test_china_fit_high_chinese_bio_and_cn_location():
+    c = {"bio": "分布式向量检索工程师", "name": "Qin Liu", "location": "Beijing, China", "org": ""}
+    r = scoring.china_fit(c)
+    assert r["level"] == "high"
+    assert any("中文" in x for x in r["reasons"])
+    assert any("中国" in x for x in r["reasons"])
+
+
+def test_china_fit_medium_cn_org_only():
+    c = {"bio": "backend engineer", "name": "Wei Wang", "location": "Remote", "org": "ByteDance"}
+    r = scoring.china_fit(c)
+    assert r["level"] == "medium"
+    assert any("bytedance" in x.lower() for x in r["reasons"])
+
+
+def test_china_fit_greater_china_is_modest():
+    c = {"bio": "ML engineer", "name": "Alex", "location": "Singapore", "org": ""}
+    r = scoring.china_fit(c)
+    assert r["score"] == 0.2          # 大中华区单一弱信号
+    assert r["level"] == "low"
+
+
+def test_china_fit_low_when_no_signals():
+    c = {"bio": "web developer", "name": "John Smith", "location": "Berlin, Germany", "org": "Acme"}
+    r = scoring.china_fit(c)
+    assert r["level"] == "low"
+    assert r["score"] == 0.0
+    assert r["reasons"] == []          # 不编造信号
+
+
 def test_apply_weight_factor(make_gh_cand):
     c = make_gh_cand()
     c["problem_fit_score"] = 80.0

@@ -100,6 +100,7 @@ async def run_pipeline(problem: str) -> AsyncIterator[Dict[str, Any]]:
                     elif not c.get("why_relevant"):
                         c["why_relevant"] = _fallback_why(c)
                     c["hireability"] = scoring.hireability(c)
+                    c["china_fit"] = scoring.china_fit(c)
                 scoring.apply_weight(cands, channels[ch]["weight"])
                 return cands
 

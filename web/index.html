@@ -96,8 +96,14 @@
           <option value="medium">medium</option>
           <option value="soft">soft（软证据）</option>
         </select>
+        <select id="filter-cn" class="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white" title="中文能力/地理时区/中国市场经验等岗位信号（启发式，非族裔）">
+          <option value="all">全部中国契合度</option>
+          <option value="high">中国契合·高</option>
+          <option value="medium">中国契合·中高</option>
+        </select>
         <select id="sort" class="text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
           <option value="score">按契合度</option>
+          <option value="china">按中国契合度</option>
           <option value="source">按来源</option>
           <option value="strength">按证据强度</option>
         </select>
@@ -126,6 +132,10 @@ const HIRE = {
   high:   '<span class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-sky-100 text-sky-700">可挖性高</span>',
   medium: '<span class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-500">可挖性中</span>',
   low:    '<span class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-400">可挖性低</span>'
+};
+const CHINA = {
+  high:   '<span class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-rose-100 text-rose-700" title="中文能力/地理时区/中国市场经验（启发式信号，非族裔）">中国契合·高</span>',
+  medium: '<span class="text-[11px] font-medium px-2 py-0.5 rounded-md bg-rose-50 text-rose-500" title="中文能力/地理时区/中国市场经验（启发式信号，非族裔）">中国契合·中</span>'
 };
 const CAT = { technical: '技术', marketing: '营销', other: '经营/管理/其他' };
 
@@ -248,13 +258,17 @@ function renderPlan(r){
 
 function renderList(){
   let cs = state.candidates.slice();
-  const fs = $('#filter-source').value, fst = $('#filter-strength').value, sort = $('#sort').value;
+  const fs = $('#filter-source').value, fst = $('#filter-strength').value, fcn = $('#filter-cn').value, sort = $('#sort').value;
   if(fs!=='all') cs = cs.filter(c=>c.source===fs);
   if(fst!=='all') cs = cs.filter(c=>c.evidence_strength===fst);
+  if(fcn==='high') cs = cs.filter(c=>c.china_fit?.level==='high');
+  else if(fcn==='medium') cs = cs.filter(c=>['high','medium'].includes(c.china_fit?.level));
   const order = {hard:0,medium:1,soft:2};
   const ws = (c)=> (c.weighted_score!=null && c.weighted_score>0) ? c.weighted_score : c.problem_fit_score;
+  const cn = (c)=> (c.china_fit?.score)||0;
   if(sort==='source') cs.sort((a,b)=> a.source.localeCompare(b.source) || ws(b)-ws(a));
   else if(sort==='strength') cs.sort((a,b)=> order[a.evidence_strength]-order[b.evidence_strength] || ws(b)-ws(a));
+  else if(sort==='china') cs.sort((a,b)=> cn(b)-cn(a) || ws(b)-ws(a));   // 中国契合度优先，同分按融合分
   else cs.sort((a,b)=> ws(b)-ws(a));  // 融合总榜：按跨渠道加权分排序
 
   $('#count').textContent = `· ${cs.length} 人`;
@@ -277,6 +291,7 @@ function card(c, rank){
   const contact = c.contact_hint ? `<span class="text-[11px] text-slate-400">✉ ${esc(c.contact_hint)}</span>` : '';
   const loc = c.location ? `<span class="text-[11px] text-slate-400">📍 ${esc(c.location)}</span>` : '';
   const hireReasons = esc((c.hireability?.reasons||[]).join('；'));
+  const cnReasons = esc((c.china_fit?.reasons||[]).join('；'));
 
   return `
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 fade-in hover:border-slate-300 transition">
@@ -302,11 +317,13 @@ function card(c, rank){
         <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
           ${STRENGTH[c.evidence_strength]||''}
           ${HIRE[c.hireability?.level]||''}
+          ${CHINA[c.china_fit?.level]||''}
           ${loc} ${contact}
         </div>
         <p class="text-sm text-slate-600 mt-2 leading-relaxed">${esc(c.why_relevant)}</p>
         <div class="mt-2 space-y-0.5">${ev}</div>
         ${hireReasons?`<div class="text-[11px] text-slate-400 mt-1.5">可挖性信号：${hireReasons}</div>`:''}
+        ${cnReasons?`<div class="text-[11px] text-rose-400 mt-1">中国契合信号：${cnReasons}</div>`:''}
         ${c.subscores?`<div class="text-[11px] text-slate-300 mt-1">相关性 ${c.subscores.relevance} · ${c.source==='github'?'贡献深度':'影响力'} ${c.subscores.depth_or_influence} · 活跃 ${c.subscores.recency}</div>`:''}
       </div>
     </div>
@@ -317,7 +334,7 @@ function card(c, rank){
 $('#go').addEventListener('click', startSearch);
 $('#problem').addEventListener('keydown', (e)=>{ if((e.metaKey||e.ctrlKey) && e.key==='Enter') startSearch(); });
 document.querySelectorAll('.example').forEach(b=> b.addEventListener('click', ()=>{ $('#problem').value = b.dataset.q; startSearch(); }));
-['filter-source','filter-strength','sort'].forEach(id=> $('#'+id).addEventListener('change', renderList));
+['filter-source','filter-strength','filter-cn','sort'].forEach(id=> $('#'+id).addEventListener('change', renderList));
 </script>
 </body>
 </html>

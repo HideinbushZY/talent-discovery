@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import math
+import re
 import time
 from typing import Any, Dict, List
 
@@ -17,6 +18,20 @@ _HIRE_PLUS = ["open to work", "open-to-work", "freelance", "consulting", "consul
 _HIRE_BIGORG = ["google", "meta", "facebook", "openai", "anthropic", "microsoft",
                 "amazon", "apple", "nvidia", "deepmind", "bytedance", "tencent",
                 "alibaba", "netflix", "stripe", "databricks"]
+
+# 中国契合度（China-fit）——给中国公司用：衡量"能否直接为我所用"。
+# 全部是**岗位相关的客观信号**（中文能力 / 地理时区 / 中国市场经验），非族裔推断。
+_HAN_RE = re.compile(r"[一-鿿]")   # 中日韩统一表意文字（中文）
+_CN_LOCATIONS = ["china", "中国", "中华人民共和国", "prc", "beijing", "北京", "shanghai", "上海",
+                 "shenzhen", "深圳", "hangzhou", "杭州", "guangzhou", "广州", "chengdu", "成都",
+                 "nanjing", "南京", "wuhan", "武汉", "xi'an", "西安", "suzhou", "苏州",
+                 "tianjin", "天津", "chongqing", "重庆", "changsha", "长沙", "hefei", "合肥"]
+_GREATER_CN = ["hong kong", "香港", "taiwan", "台湾", "taipei", "台北", "macau", "澳门", "singapore", "新加坡"]
+_CN_ORGS = ["bytedance", "字节", "tiktok", "tencent", "腾讯", "alibaba", "阿里", "ant group", "蚂蚁",
+            "baidu", "百度", "huawei", "华为", "meituan", "美团", "didi", "滴滴", "xiaomi", "小米",
+            "jd.com", "京东", "netease", "网易", "kuaishou", "快手", "pinduoduo", "拼多多",
+            "sensetime", "商汤", "megvii", "旷视", "moonshot", "月之暗面", "zhipu", "智谱",
+            "deepseek", "深度求索", "minimax", "01.ai", "零一万物", "bilibili", "哔哩"]
 
 
 def _log_norm(x: float, cap: float) -> float:
@@ -107,6 +122,50 @@ def hireability(cand: Dict[str, Any]) -> Dict[str, Any]:
     if not reasons:
         reasons.append("无明显信号，按中性处理")
     return {"level": level, "reasons": reasons}
+
+
+def china_fit(cand: Dict[str, Any]) -> Dict[str, Any]:
+    """中国契合度（启发式）：给中国公司用，衡量候选"能否直接为我所用"。
+
+    只看**岗位相关的客观信号**——不做族裔推断：
+      - 中文能力：个人简介/署名使用中文
+      - 地理/时区：位于中国 / 大中华区
+      - 中国市场经验：现/曾任职中国公司
+    输出 {level, score(0-1), reasons[]}，UI 标注"启发式信号、仅供参考"。
+    """
+    bio = cand.get("bio") or ""
+    name = cand.get("name") or ""
+    loc_raw = (cand.get("location") or "").strip()
+    loc = loc_raw.lower()
+    blob = (bio + " " + (cand.get("org") or "")).lower()
+    reasons: List[str] = []
+    score = 0.0
+
+    # 中文能力
+    if _HAN_RE.search(bio):
+        score += 0.45
+        reasons.append("个人简介用中文")
+    elif _HAN_RE.search(name):
+        score += 0.25
+        reasons.append("署名含中文")
+
+    # 地理 / 时区
+    if any(l in loc for l in _CN_LOCATIONS):
+        score += 0.40
+        reasons.append(f"位于中国（{loc_raw[:24]}）")
+    elif any(l in loc for l in _GREATER_CN):
+        score += 0.20
+        reasons.append(f"位于大中华区（{loc_raw[:24]}）")
+
+    # 中国市场 / 公司经验
+    cn_org = next((o for o in _CN_ORGS if o in blob), None)
+    if cn_org:
+        score += 0.40
+        reasons.append(f"中国市场/公司经验（{cn_org}）")
+
+    score = min(1.0, round(score, 2))
+    level = "high" if score >= 0.6 else "medium" if score >= 0.3 else "low"
+    return {"level": level, "score": score, "reasons": reasons}
 
 
 def apply_weight(cands: List[Dict[str, Any]], weight: float) -> None:
