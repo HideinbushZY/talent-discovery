@@ -115,8 +115,11 @@ class _FakeClient:
         return _FakeResp(status, content)
 
 
+_ONE_PROVIDER = [{"name": "p", "api_key": "k", "base_url": "http://x", "model": "m"}]
+
+
 async def test_chat_json_retries_empty_then_succeeds(monkeypatch):
-    monkeypatch.setattr(appconfig, "KIMI_API_KEY", "test-key")
+    monkeypatch.setattr(appconfig, "LLM_PROVIDERS", _ONE_PROVIDER)
     fake = _FakeClient([(200, ""), (200, '{"ok": true}')])   # 先空内容，再成功
     monkeypatch.setattr(llm.httpx, "AsyncClient", lambda *a, **k: fake)
     out = await llm._chat_json("sys", "user", max_tokens=100)
@@ -125,9 +128,40 @@ async def test_chat_json_retries_empty_then_succeeds(monkeypatch):
 
 
 async def test_chat_json_gives_up_after_retries(monkeypatch):
-    monkeypatch.setattr(appconfig, "KIMI_API_KEY", "test-key")
+    monkeypatch.setattr(appconfig, "LLM_PROVIDERS", _ONE_PROVIDER)
     fake = _FakeClient([(500, "boom")])                       # 一直 500
     monkeypatch.setattr(llm.httpx, "AsyncClient", lambda *a, **k: fake)
     with pytest.raises(Exception):
         await llm._chat_json("sys", "user", max_tokens=100, retries=1)
     assert fake.calls == 2                                    # 1 次 + 1 次重试
+
+
+class _ByModelClient:
+    """按 payload 的 model 返回不同结果，用于验证多供应商降级。"""
+    def __init__(self):
+        self.models = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def post(self, url, headers=None, json=None):
+        m = json["model"]
+        self.models.append(m)
+        if m == "primary-model":
+            return _FakeResp(500, "boom")
+        return _FakeResp(200, '{"ok": true, "via": "fallback"}')
+
+
+async def test_chat_json_failover_to_second_provider(monkeypatch):
+    monkeypatch.setattr(appconfig, "LLM_PROVIDERS", [
+        {"name": "primary", "api_key": "k1", "base_url": "http://x", "model": "primary-model"},
+        {"name": "fallback", "api_key": "k2", "base_url": "http://y", "model": "fallback-model"},
+    ])
+    fake = _ByModelClient()
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda *a, **k: fake)
+    out = await llm._chat_json("sys", "user", max_tokens=50, retries=0)
+    assert out["ok"] is True                                  # 主失败 → 降级到第二供应商成功
+    assert fake.models == ["primary-model", "fallback-model"]

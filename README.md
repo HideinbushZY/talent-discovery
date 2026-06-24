@@ -145,6 +145,8 @@ evals/             阶段1 路由质量评测（golden set + runner）
 - `tests/`：评分公式、权重归一化、JSON 解析、缓存/限速、连接器解析，以及**整条管线的集成测试**（双通道排序、GitHub 诚实跳过、experimental 提示、LLM 失败兜底）。
 - `evals/golden_set.json`：一组难题 + 期望的 category / maturity / 逐通道适用性，作为改 prompt 或换模型后的**回归门槛**。往里加例子即可扩大覆盖。
 
+**LLM 韧性**：单次调用失败/空内容会**重试并加大 token 预算**；主供应商（kimi-k2.6）耗尽重试后**自动降级**到下一个供应商——默认是同 key 的非思考模型 `moonshot-v1-128k`（更快更稳），还可配 `LLM_FALLBACK_API_KEY` 接入完全不同的供应商。降级会打 `llm_provider_failover` 日志。
+
 **可观测性**：每次搜索在日志里留**一行结构化 JSON**（`search.done`）——含 `request_id`、各阶段耗时、降级事件、X 读取数、模型。`request_id` 也回传到结果 `meta` 并显示在页面，便于和日志对账。降级（LLM 兜底、通道出错、复核失败、限速）走 `WARNING`。配 `SENTRY_DSN` 可把异常上报 Sentry。
 
 **CI（GitHub Actions）**：

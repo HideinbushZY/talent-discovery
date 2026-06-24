@@ -54,3 +54,12 @@ def test_x_parse_ts():
 def test_github_parse_ts():
     assert ghmod._parse_ts(None) is None
     assert ghmod._parse_ts("2026-01-01T00:00:00Z") > 0
+
+
+def test_repo_format_validation():
+    assert ghmod._REPO_RE.match("milvus-io/milvus")
+    assert ghmod._REPO_RE.match("facebookresearch/faiss")
+    assert not ghmod._REPO_RE.match("../../etc/passwd")    # 路径注入
+    assert not ghmod._REPO_RE.match("owner/repo/extra")
+    assert not ghmod._REPO_RE.match("noslash")
+    assert not ghmod._REPO_RE.match("")

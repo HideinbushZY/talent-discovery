@@ -32,6 +32,31 @@ KIMI_API_KEY = (os.getenv("KIMI_API_KEY", "") or os.getenv("MOONSHOT_API_KEY", "
 KIMI_BASE_URL = os.getenv("KIMI_BASE_URL", "https://api.moonshot.cn/v1").strip().rstrip("/")
 KIMI_MODEL = os.getenv("KIMI_MODEL", "kimi-k2.6").strip() or "kimi-k2.6"
 
+# 多供应商兜底：主用 Kimi；主失败后按顺序降级，彻底告别单点。
+#  1) 同 key/endpoint 的**非思考**模型（默认 moonshot-v1-128k，更稳、不会被 thinking 吃光 token）
+#  2) 完全不同的供应商（可选，需另一把 key + base_url + model）
+LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "moonshot-v1-128k").strip()
+LLM_FALLBACK_API_KEY = os.getenv("LLM_FALLBACK_API_KEY", "").strip()
+LLM_FALLBACK_BASE_URL = os.getenv("LLM_FALLBACK_BASE_URL", "").strip().rstrip("/")
+LLM_FALLBACK_PROVIDER_MODEL = os.getenv("LLM_FALLBACK_PROVIDER_MODEL", "").strip()
+
+
+def _llm_providers() -> list:
+    out = []
+    if KIMI_API_KEY:
+        out.append({"name": "kimi", "api_key": KIMI_API_KEY, "base_url": KIMI_BASE_URL, "model": KIMI_MODEL})
+        if LLM_FALLBACK_MODEL and LLM_FALLBACK_MODEL != KIMI_MODEL:
+            out.append({"name": f"kimi:{LLM_FALLBACK_MODEL}", "api_key": KIMI_API_KEY,
+                        "base_url": KIMI_BASE_URL, "model": LLM_FALLBACK_MODEL})
+    if LLM_FALLBACK_API_KEY:
+        out.append({"name": "fallback-provider", "api_key": LLM_FALLBACK_API_KEY,
+                    "base_url": LLM_FALLBACK_BASE_URL or "https://api.openai.com/v1",
+                    "model": LLM_FALLBACK_PROVIDER_MODEL or "gpt-4o-mini"})
+    return out
+
+
+LLM_PROVIDERS = _llm_providers()
+
 # ── 成本 / 范围控制 ───────────────────────────────────────────
 X_READ_BUDGET = _int("X_READ_BUDGET", 300)        # 每次搜索 X 帖子读取上限
 X_SESSION_READ_CAP = _int("X_SESSION_READ_CAP", 3000)  # 进程级 X 读取总上限（防失控，~$15）
@@ -57,6 +82,7 @@ def summary() -> dict:
         "kimi_key": mask(KIMI_API_KEY),
         "llm_base_url": KIMI_BASE_URL,
         "llm_model": KIMI_MODEL,
+        "llm_providers": [p["name"] for p in LLM_PROVIDERS],
         "x_read_budget": X_READ_BUDGET,
         "top_n_per_channel": TOP_N_PER_CHANNEL,
     }

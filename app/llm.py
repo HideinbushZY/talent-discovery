@@ -25,49 +25,58 @@ _resolve_lock: Optional[asyncio.Lock] = None
 
 async def _chat_json(system: str, user: str, max_tokens: int = 2500,
                      retries: int = 2) -> Dict[str, Any]:
-    """调用 Kimi chat/completions，强制 JSON 输出并解析为 dict。
-
-    kimi-k2.6（thinking 模型）只接受 temperature=1，故不传该参数用默认值。
-    韧性：失败/空内容/解析错时重试，并**提高 token 预算**（空内容多半是 thinking 把
-    预算吃光），带退避。retries=0 可关闭重试（测试用）。
-    """
-    if not config.KIMI_API_KEY:
-        raise RuntimeError("未配置 KIMI_API_KEY")
-    headers = {"Authorization": f"Bearer {config.KIMI_API_KEY}",
-               "Content-Type": "application/json"}
-    budget = max_tokens
+    """强制 JSON 输出并解析为 dict。多供应商兜底：主供应商耗尽重试后降级到下一个。"""
+    providers = config.LLM_PROVIDERS
+    if not providers:
+        raise RuntimeError("未配置任何 LLM 供应商（KIMI_API_KEY）")
     last_err: Exception | None = None
     async with httpx.AsyncClient(timeout=200) as client:
-        for attempt in range(retries + 1):
-            payload = {
-                "model": config.KIMI_MODEL,
-                "max_tokens": budget,
-                "response_format": {"type": "json_object"},
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-            }
+        for pi, prov in enumerate(providers):
             try:
-                r = await client.post(f"{config.KIMI_BASE_URL}/chat/completions",
-                                      headers=headers, json=payload)
-                if r.status_code != 200:
-                    raise RuntimeError(f"Kimi API {r.status_code}: {r.text[:160]}")
-                content = r.json()["choices"][0]["message"].get("content") or ""
-                if not content.strip():
-                    raise RuntimeError("模型返回空内容（可能 thinking 占满 token）")
-                return _parse_json(content)
+                return await _chat_one(client, prov, system, user, max_tokens, retries)
             except Exception as e:  # noqa: BLE001
                 last_err = e
-                next_budget = min(int(budget * 1.6), 16000)   # 下次给更大预算
-                if attempt < retries:
-                    obs.log(_LOG, logging.WARNING, "kimi_retry", attempt=attempt + 1,
-                            error=str(e)[:100], next_budget=next_budget)
-                    budget = next_budget
-                    await asyncio.sleep(0.6 * (attempt + 1))
-                else:
-                    budget = next_budget
-    raise last_err if last_err else RuntimeError("Kimi 调用失败")
+                if pi + 1 < len(providers):
+                    obs.log(_LOG, logging.WARNING, "llm_provider_failover",
+                            error=str(e)[:100], **{"from": prov["name"], "to": providers[pi + 1]["name"]})
+    raise last_err if last_err else RuntimeError("LLM 调用失败")
+
+
+async def _chat_one(client: httpx.AsyncClient, prov: Dict[str, Any],
+                    system: str, user: str, max_tokens: int, retries: int) -> Dict[str, Any]:
+    """单个供应商：强制 JSON 输出 + 失败/空内容重试并提高 token 预算（不传 temperature）。"""
+    headers = {"Authorization": f"Bearer {prov['api_key']}", "Content-Type": "application/json"}
+    budget = max_tokens
+    last_err: Exception | None = None
+    for attempt in range(retries + 1):
+        payload = {
+            "model": prov["model"],
+            "max_tokens": budget,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        try:
+            r = await client.post(f"{prov['base_url']}/chat/completions", headers=headers, json=payload)
+            if r.status_code != 200:
+                raise RuntimeError(f"{prov['name']} API {r.status_code}: {r.text[:160]}")
+            content = r.json()["choices"][0]["message"].get("content") or ""
+            if not content.strip():
+                raise RuntimeError("模型返回空内容（可能 thinking 占满 token）")
+            return _parse_json(content)
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            next_budget = min(int(budget * 1.6), 16000)
+            if attempt < retries:
+                obs.log(_LOG, logging.WARNING, "llm_retry", provider=prov["name"],
+                        attempt=attempt + 1, error=str(e)[:100], next_budget=next_budget)
+                budget = next_budget
+                await asyncio.sleep(0.6 * (attempt + 1))
+            else:
+                budget = next_budget
+    raise last_err if last_err else RuntimeError("LLM 调用失败")
 
 
 def _parse_json(text: str) -> Dict[str, Any]:

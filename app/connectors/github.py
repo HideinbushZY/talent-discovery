@@ -1,8 +1,8 @@
 """GitHubConnector（spec §6.1）：核心 repo 贡献排名 + 全网代码搜索，去重到"人"。"""
 from __future__ import annotations
 
-import time
-from datetime import datetime, timezone
+import re
+from datetime import datetime
 from typing import Any, Dict, List
 
 import httpx
@@ -12,6 +12,8 @@ from ..cache import RateLimiter, TTLCache, gather_limited
 from .base import Connector, ProgressCb, add_evidence, new_candidate
 
 API = "https://api.github.com"
+# owner/repo 合法格式，防止把不可信字符串拼进 API 路径（路径注入）
+_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _user_cache = TTLCache(ttl=1800)
 _repo_cache = TTLCache(ttl=1800)
 
@@ -43,7 +45,9 @@ class GitHubConnector(Connector):
         await rl.acquire()
         url = path if path.startswith("http") else f"{API}{path}"
         r = await client.get(url, params=params, headers=self.headers, timeout=30)
-        if r.status_code == 403 and "rate limit" in r.text.lower():
+        # 主限速(403)、二级限速、滥用检测、429 都按"限速"处理（上层 catch → 返回空，优雅降级）
+        if r.status_code == 429 or (r.status_code == 403 and (
+                "rate limit" in r.text.lower() or "secondary" in r.text.lower())):
             raise RuntimeError("github rate limited")
         r.raise_for_status()
         return r.json()
@@ -93,7 +97,7 @@ class GitHubConnector(Connector):
                 cands[key] = new_candidate("github", login)
             return cands[key]
 
-        seed_repos = [r for r in plan.get("seed_repos", []) if "/" in r][:6]
+        seed_repos = [r for r in plan.get("seed_repos", []) if _REPO_RE.match(r or "")][:6]
         path_hints = plan.get("relevant_paths_hint", [])[:3]
         queries = plan.get("code_search_queries", [])[:3]
 
