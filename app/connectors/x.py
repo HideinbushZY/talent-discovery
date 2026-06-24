@@ -170,6 +170,7 @@ class XConnector(Connector):
             top = agg.get("top")
             if top and top.get("id"):
                 pm = top["pm"]
+                c["_self_text"] = (top.get("text") or "")[:600]   # 帖子原文，供 LLM 判定中文能力
                 c["_signals"]["matched_paths"] = False
                 add_evidence(
                     c, "post",

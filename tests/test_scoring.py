@@ -95,6 +95,22 @@ def test_china_fit_low_when_no_signals():
     assert r["reasons"] == []          # 不编造信号
 
 
+def test_china_fit_uses_llm_judgment_when_given():
+    # 英文 bio，但 Kimi 判定中文能力高（看了 commit/帖子）+ 北京 → high
+    c = {"bio": "backend engineer", "name": "Wei", "location": "Beijing, China", "org": ""}
+    r = scoring.china_fit(c, llm_cn_lang=0.9)
+    assert r["level"] == "high"
+    assert any("中文" in x and "AI" in x for x in r["reasons"])
+
+
+def test_china_fit_llm_overrides_regex():
+    # bio 里有中文字，但 Kimi 判定中文能力低 → 信 AI，不计中文分
+    c = {"bio": "我 love coding", "name": "X", "location": "Remote", "org": ""}
+    r = scoring.china_fit(c, llm_cn_lang=0.1)
+    assert not any("中文" in x for x in r["reasons"])
+    assert r["score"] == 0.0
+
+
 def test_apply_weight_factor(make_gh_cand):
     c = make_gh_cand()
     c["problem_fit_score"] = 80.0

@@ -151,7 +151,9 @@ class GitHubConnector(Connector):
                         if ts and (c["_signals"]["recency_ts"] or 0) < ts:
                             c["_signals"]["recency_ts"] = ts
                         _lines = ((obj.get("commit") or {}).get("message") or "").splitlines()
-                        msg = (_lines[0] if _lines else "")[:60]
+                        _raw_msg = _lines[0] if _lines else ""
+                        msg = _raw_msg[:60]
+                        c["_self_text"] = (c.get("_self_text", "") + " " + _raw_msg)[:600]
                         add_evidence(c, "commit", f"在 {full} 的 `{hint}` 模块提交：{msg}",
                                      url=obj.get("html_url"), metric="相关模块提交")
 

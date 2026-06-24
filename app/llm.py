@@ -252,18 +252,22 @@ async def _review_batch(problem, subproblems, channel, candidates) -> Dict[str, 
             f"{e.get('type','')}:{e.get('description','')}({e.get('metric','')})"
             for e in c.get("evidence", [])[:4]
         )
+        self_text = ((c.get("bio") or "") + " " + (c.get("_self_text") or "")).strip()
         lines.append(json.dumps(
             {"id": c["id"], "name": c.get("name") or c.get("handle"),
              "bio": (c.get("bio") or "")[:200], "source": c.get("source"),
-             "evidence": ev[:600]},
+             "evidence": ev[:600], "self_text": self_text[:400]},
             ensure_ascii=False,
         ))
     system = (
         "你在为'从问题出发的人才发现'做相关性复核。给定企业难题和一批来自"
-        f"{channel} 的候选人（含其证据），判断每人与难题的真实契合度（0-1），"
-        "并写一句中文 why（引用其具体证据）。蹭词、明显无关、bot 给低分。\n"
-        '只输出 JSON 对象，结构：{"reviews":[{"id":"原样id","relevance":0.0到1.0的数字,'
-        '"why_relevant":"一句中文"}]}，对每个候选人都给一条。'
+        f"{channel} 的候选人（含其证据），对每人做三件事：\n"
+        "1) relevance：与难题的真实契合度（0-1）；蹭词/明显无关/bot 给低分。\n"
+        "2) why_relevant：一句中文，引用其具体证据。\n"
+        "3) cn_lang：其**中文工作能力**（0-1）——只依据 self_text（候选人**自己写**的文字："
+        "简介/提交信息/帖子原文）：全是流利中文≈1，夹杂中文/能读写≈0.5，看不出中文能力≈0。"
+        "注意：只看 self_text，**不要**被 evidence 里系统生成的中文描述（如「X 的贡献者」）误导。\n"
+        '只输出 JSON：{"reviews":[{"id":"原样id","relevance":数字,"why_relevant":"一句中文","cn_lang":数字}]}，每人一条。'
     )
     user = (f"难题：{problem}\n子问题：{', '.join(subproblems)}\n\n候选人（每行一个 JSON）：\n"
             + "\n".join(lines))
@@ -276,9 +280,11 @@ async def _review_batch(problem, subproblems, channel, candidates) -> Dict[str, 
         rid = r.get("id")
         if not rid:
             continue
+        cn = r.get("cn_lang")
         out[rid] = {
             "relevance": max(0.0, min(1.0, _safe_float(r.get("relevance", 0)))),
             "why_relevant": r.get("why_relevant", ""),
+            "cn_lang": None if cn is None else max(0.0, min(1.0, _safe_float(cn))),
         }
     return out
 

@@ -124,13 +124,13 @@ def hireability(cand: Dict[str, Any]) -> Dict[str, Any]:
     return {"level": level, "reasons": reasons}
 
 
-def china_fit(cand: Dict[str, Any]) -> Dict[str, Any]:
+def china_fit(cand: Dict[str, Any], llm_cn_lang: float | None = None) -> Dict[str, Any]:
     """中国契合度（启发式）：给中国公司用，衡量候选"能否直接为我所用"。
 
     只看**岗位相关的客观信号**——不做族裔推断：
-      - 中文能力：个人简介/署名使用中文
-      - 地理/时区：位于中国 / 大中华区
-      - 中国市场经验：现/曾任职中国公司
+      - 中文能力：优先用 Kimi 对候选自述文字的判定（llm_cn_lang 0-1），无则回退正则（有无中文字）
+      - 地理/时区：位于中国 / 大中华区（结构化 location 字段）
+      - 中国市场经验：现/曾任职中国公司（结构化 org 字段）
     输出 {level, score(0-1), reasons[]}，UI 标注"启发式信号、仅供参考"。
     """
     bio = cand.get("bio") or ""
@@ -141,8 +141,16 @@ def china_fit(cand: Dict[str, Any]) -> Dict[str, Any]:
     reasons: List[str] = []
     score = 0.0
 
-    # 中文能力
-    if _HAN_RE.search(bio):
+    # 中文能力：优先信 Kimi 的判定（看候选真实文字），无则回退"有无中文字"正则
+    if llm_cn_lang is not None:
+        if llm_cn_lang >= 0.7:
+            score += 0.45
+            reasons.append("能用中文工作（AI 判定）")
+        elif llm_cn_lang >= 0.4:
+            score += 0.25
+            reasons.append("具备一定中文能力（AI 判定）")
+        # < 0.4：AI 认为基本不具备 → 不计中文分（信 AI，不再用正则）
+    elif _HAN_RE.search(bio):
         score += 0.45
         reasons.append("个人简介用中文")
     elif _HAN_RE.search(name):

@@ -35,6 +35,8 @@ def new_candidate(source: str, key: str) -> Dict[str, Any]:
         "org": None,
         "followers": 0,
         "evidence": [],
+        # 候选**自己写的**文字样本（commit message / 帖子原文），供 LLM 判定中文能力
+        "_self_text": "",
         # 采集阶段填入的原始信号（评分用，不直接展示）
         "_signals": {
             "relevance_hits": 0.0,   # 匹配强度累积（path/code 命中更高）
