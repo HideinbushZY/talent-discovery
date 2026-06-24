@@ -57,6 +57,19 @@ async def test_job_error_is_captured(monkeypatch, tmp_path):
     assert job.events[-1]["type"] == "close"
 
 
+async def test_feedback_save_list_and_upsert(monkeypatch, tmp_path):
+    monkeypatch.setattr(store, "DB_PATH", tmp_path / "fb.db")
+    monkeypatch.setattr(store, "_conn", None)
+    assert await store.save_feedback("job1", "github:a", "难题", "up", "很准") is True
+    assert await store.save_feedback("job1", "github:b", "难题", "down", "") is True
+    # 同一 (job, candidate) 改票 → 覆盖，不新增
+    assert await store.save_feedback("job1", "github:a", "难题", "down", "改主意了") is True
+    items = await store.list_feedback()
+    assert len(items) == 2
+    a = next(i for i in items if i["candidate_id"] == "github:a")
+    assert a["vote"] == "down" and a["comment"] == "改主意了"
+
+
 async def test_status_view_falls_back_to_store(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "DB_PATH", tmp_path / "s.db")
     monkeypatch.setattr(store, "_conn", None)

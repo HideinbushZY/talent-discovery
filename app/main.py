@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from . import config, llm
 from . import observability as obs
+from . import store
 from .jobs import manager as jobs
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -50,6 +51,14 @@ app = FastAPI(title="从问题出发的人才发现", version="2.0",
 
 class SearchBody(BaseModel):
     problem: str
+
+
+class FeedbackBody(BaseModel):
+    job_id: str
+    candidate_id: str
+    vote: str            # "up" | "down"
+    comment: str = ""
+    problem: str = ""
 
 
 @app.get("/api/health")
@@ -129,6 +138,24 @@ async def stream_search(job_id: str, request: Request):
                 yield ": ping\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+@app.post("/api/feedback")
+async def submit_feedback(body: FeedbackBody):
+    """内测反馈：对某次搜索里的某个候选投 准/不准 + 可选备注（落库）。"""
+    if body.vote not in ("up", "down"):
+        return JSONResponse({"error": "vote 必须是 up 或 down"}, status_code=400)
+    ok = await store.save_feedback(body.job_id, body.candidate_id,
+                                   body.problem[:200], body.vote, body.comment[:500])
+    obs.log(obs.get_logger("feedback"), 20, "feedback",
+            candidate=body.candidate_id, vote=body.vote, has_comment=bool(body.comment))
+    return {"ok": ok}
+
+
+@app.get("/api/feedback")
+async def get_feedback(limit: int = 500):
+    """给项目方回看内测反馈（受 Basic Auth 保护）。"""
+    return {"items": await store.list_feedback(limit)}
 
 
 @app.get("/")

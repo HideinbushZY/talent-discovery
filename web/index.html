@@ -145,7 +145,7 @@ async function startSearch(){
   const p = $('#problem').value.trim();
   if(!p) return;
   cleanup();
-  state = { candidates: [], result: null, jobId: null, finished: false };
+  state = { candidates: [], result: null, jobId: null, finished: false, feedback: {} };
   $('#results').classList.add('hidden');
   $('#error').classList.add('hidden');
   $('#progress').classList.remove('hidden');
@@ -322,6 +322,8 @@ function card(c, rank){
   const loc = c.location ? `<span class="text-[11px] text-slate-400">📍 ${esc(c.location)}</span>` : '';
   const hireReasons = esc((c.hireability?.reasons||[]).join('；'));
   const cnReasons = esc((c.china_fit?.reasons||[]).join('；'));
+  const fb = state.feedback[c.id] || {};
+  const fbBtn = (vote,label,activeCls) => `<button class="fb-btn text-[11px] px-2 py-0.5 rounded-md border ${fb.vote===vote?activeCls:'border-slate-200 text-slate-500 hover:bg-slate-50'}" data-cid="${esc(c.id)}" data-vote="${vote}">${label}</button>`;
 
   return `
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 fade-in hover:border-slate-300 transition">
@@ -355,9 +357,31 @@ function card(c, rank){
         ${hireReasons?`<div class="text-[11px] text-slate-400 mt-1.5">可挖性信号：${hireReasons}</div>`:''}
         ${cnReasons?`<div class="text-[11px] text-rose-400 mt-1">中国契合信号：${cnReasons}</div>`:''}
         ${c.subscores?`<div class="text-[11px] text-slate-300 mt-1">相关性 ${c.subscores.relevance} · ${c.source==='github'?'贡献深度':'影响力'} ${c.subscores.depth_or_influence} · 活跃 ${c.subscores.recency}</div>`:''}
+        <div class="flex items-center gap-2 mt-2 pt-2 border-t border-slate-100">
+          <span class="text-[11px] text-slate-400 shrink-0">这个人合适吗?</span>
+          ${fbBtn('up','👍 准','bg-emerald-100 text-emerald-700 border-emerald-300')}
+          ${fbBtn('down','👎 不准','bg-rose-100 text-rose-700 border-rose-300')}
+          <input class="fb-comment text-[11px] border border-slate-200 rounded px-2 py-0.5 flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-emerald-400" data-cid="${esc(c.id)}" placeholder="可选备注（投票时一起提交）…" value="${esc(fb.comment||'')}">
+        </div>
       </div>
     </div>
   </div>`;
+}
+
+async function submitFeedback(cid, vote){
+  const input = document.querySelector('.fb-comment[data-cid="'+cid+'"]');
+  const comment = input ? input.value : '';
+  state.feedback[cid] = { vote, comment };
+  document.querySelectorAll('.fb-btn[data-cid="'+cid+'"]').forEach(b => {
+    const isUp = b.dataset.vote === 'up';
+    const active = b.dataset.vote === vote;
+    const activeCls = isUp ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'bg-rose-100 text-rose-700 border-rose-300';
+    b.className = 'fb-btn text-[11px] px-2 py-0.5 rounded-md border ' + (active ? activeCls : 'border-slate-200 text-slate-500 hover:bg-slate-50');
+  });
+  try {
+    await fetch('/api/feedback', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({job_id: state.jobId, candidate_id: cid, vote, comment, problem: (state.result&&state.result.problem)||''})});
+  } catch(_){}
 }
 
 // events
@@ -365,6 +389,7 @@ $('#go').addEventListener('click', startSearch);
 $('#problem').addEventListener('keydown', (e)=>{ if((e.metaKey||e.ctrlKey) && e.key==='Enter') startSearch(); });
 document.querySelectorAll('.example').forEach(b=> b.addEventListener('click', ()=>{ $('#problem').value = b.dataset.q; startSearch(); }));
 ['filter-source','filter-strength','filter-cn','sort'].forEach(id=> $('#'+id).addEventListener('change', renderList));
+$('#list').addEventListener('click', (e)=>{ const b = e.target.closest('.fb-btn'); if(b) submitFeedback(b.dataset.cid, b.dataset.vote); });
 </script>
 </body>
 </html>

@@ -99,6 +99,8 @@ railway down                       # 下线（删除部署）
 - `POST /api/search {"problem": "..."}` → `{"job_id": "..."}` — 建**后台作业**，立即返回（不阻塞）
 - `GET /api/search/{job_id}` — 轮询/恢复：作业状态 + 最终结果（内存没有则查库）
 - `GET /api/search/{job_id}/stream` — **SSE** 续传进度（支持 `Last-Event-ID` 断点续传 + 心跳保活）
+- `POST /api/feedback {"job_id","candidate_id","vote":"up|down","comment","problem"}` — 内测反馈（每候选一条，可覆盖）
+- `GET /api/feedback` — 回看所有内测反馈（项目方用，受 Basic Auth 保护）
 - `GET /api/health` — 配置 + 模型自检
 
 > **Phase B 架构**：搜索是后台作业——管线 detached 跑完、结果落库（SQLite，见 `app/store.py`），

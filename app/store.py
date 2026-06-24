@@ -32,6 +32,13 @@ def _connect() -> sqlite3.Connection:
                  id TEXT PRIMARY KEY, problem TEXT, status TEXT,
                  result_json TEXT, error TEXT, created REAL, updated REAL)"""
         )
+        # 内测反馈：每个(搜索, 候选)一条裁决，可被新投票覆盖
+        _conn.execute(
+            """CREATE TABLE IF NOT EXISTS feedback(
+                 job_id TEXT, candidate_id TEXT, problem TEXT, vote TEXT,
+                 comment TEXT, created REAL, updated REAL,
+                 PRIMARY KEY (job_id, candidate_id))"""
+        )
         _conn.commit()
     return _conn
 
@@ -74,3 +81,43 @@ async def save(job_id, problem, status, result, error, created):
 
 async def get(job_id):
     return await asyncio.to_thread(_get_sync, job_id)
+
+
+# ── 内测反馈 ──────────────────────────────────────────────────
+def _save_feedback_sync(job_id, candidate_id, problem, vote, comment):
+    try:
+        with _lock:
+            c = _connect()
+            now = time.time()
+            c.execute(
+                "INSERT OR REPLACE INTO feedback VALUES (?,?,?,?,?,?,?)",
+                (job_id, candidate_id, problem, vote, comment, now, now),
+            )
+            c.commit()
+        return True
+    except Exception as e:  # noqa: BLE001
+        _log.warning("store.save_feedback failed: %s", str(e)[:120])
+        return False
+
+
+def _list_feedback_sync(limit):
+    try:
+        with _lock:
+            c = _connect()
+            rows = c.execute(
+                "SELECT job_id,candidate_id,problem,vote,comment,updated "
+                "FROM feedback ORDER BY updated DESC LIMIT ?", (limit,)
+            ).fetchall()
+        cols = ["job_id", "candidate_id", "problem", "vote", "comment", "updated"]
+        return [dict(zip(cols, r)) for r in rows]
+    except Exception as e:  # noqa: BLE001
+        _log.warning("store.list_feedback failed: %s", str(e)[:120])
+        return []
+
+
+async def save_feedback(job_id, candidate_id, problem, vote, comment):
+    return await asyncio.to_thread(_save_feedback_sync, job_id, candidate_id, problem, vote, comment)
+
+
+async def list_feedback(limit=500):
+    return await asyncio.to_thread(_list_feedback_sync, limit)
