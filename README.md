@@ -55,7 +55,8 @@ railway down                       # 下线（删除部署）
 | `X_API_BEARER_TOKEN` | X v2 推文搜索（按量付费 $0.005/读） | console.x.com → 创建 App → Keys and tokens → Bearer Token（**保持控制台显示的 URL 编码原样**，含 `%2B`/`%3D`） |
 | `KIMI_API_KEY` | Kimi / Moonshot LLM 认证（sk- 开头） | platform.moonshot.cn → API Keys |
 | `KIMI_BASE_URL` | OpenAI 兼容接口地址 | `https://api.moonshot.cn/v1`（国际站 `.ai`） |
-| `KIMI_MODEL` | 模型名 | 当前 `kimi-k2.6`（也可 `kimi-k2.5` / `moonshot-v1-128k`） |
+| `KIMI_MODEL` | 阶段1 难题理解模型（重质量） | 当前 `kimi-k2.6` |
+| `LLM_REVIEW_MODEL` | 阶段3 复核/打分模型（非思考、更快） | 当前 `moonshot-v1-128k`（比 k2.6 快 ~2.6×） |
 | `APP_PASSWORD` | 公网访问口令（用户名任意/密码=此值） | 自定义；公网部署必填 |
 | `X_READ_BUDGET` | 每次搜索 X 读取上限（先小后大） | 默认 `300` |
 | `X_SESSION_READ_CAP` | 进程级 X 读取总上限（防失控，约 $15 触顶即停） | 默认 `3000` |
@@ -160,7 +161,7 @@ evals/             阶段1 路由质量评测（golden set + runner）
 - `tests/`：评分公式、权重归一化、JSON 解析、缓存/限速、连接器解析，以及**整条管线的集成测试**（双通道排序、GitHub 诚实跳过、experimental 提示、LLM 失败兜底）。
 - `evals/golden_set.json`：一组难题 + 期望的 category / maturity / 逐通道适用性，作为改 prompt 或换模型后的**回归门槛**。往里加例子即可扩大覆盖。
 
-**LLM 韧性**：单次调用失败/空内容会**重试并加大 token 预算**；主供应商（kimi-k2.6）耗尽重试后**自动降级**到下一个供应商——默认是同 key 的非思考模型 `moonshot-v1-128k`（更快更稳），还可配 `LLM_FALLBACK_API_KEY` 接入完全不同的供应商。降级会打 `llm_provider_failover` 日志。
+**LLM 分工 + 韧性**：阶段1 难题理解用 `kimi-k2.6`（重质量）；**阶段3 复核/打分用非思考的 `moonshot-v1-128k`**（重速度，复核耗时 ~71s→27s）。单次调用失败/空内容会**重试并加大 token 预算**；耗尽重试后**自动降级**到下一个供应商（复核失败回退到 kimi-k2.6），还可配 `LLM_FALLBACK_API_KEY` 接入完全不同的供应商。降级打 `llm_provider_failover` 日志。
 
 **可观测性**：每次搜索在日志里留**一行结构化 JSON**（`search.done`）——含 `request_id`、各阶段耗时、降级事件、X 读取数、模型。`request_id` 也回传到结果 `meta` 并显示在页面，便于和日志对账。降级（LLM 兜底、通道出错、复核失败、限速）走 `WARNING`。配 `SENTRY_DSN` 可把异常上报 Sentry。
 

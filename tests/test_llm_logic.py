@@ -155,6 +155,18 @@ class _ByModelClient:
         return _FakeResp(200, '{"ok": true, "via": "fallback"}')
 
 
+async def test_chat_json_honors_providers_override(monkeypatch):
+    # 默认 providers 会失败（primary-model→500），但传入 override 用 fallback-model→成功
+    monkeypatch.setattr(appconfig, "LLM_PROVIDERS",
+                        [{"name": "default", "api_key": "k", "base_url": "http://d", "model": "primary-model"}])
+    fake = _ByModelClient()
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda *a, **k: fake)
+    out = await llm._chat_json("s", "u", retries=0,
+                               providers=[{"name": "fast", "api_key": "k", "base_url": "http://o", "model": "fallback-model"}])
+    assert out["ok"] is True
+    assert fake.models == ["fallback-model"]   # 用了 override 的模型，没碰默认的 primary-model
+
+
 async def test_chat_json_failover_to_second_provider(monkeypatch):
     monkeypatch.setattr(appconfig, "LLM_PROVIDERS", [
         {"name": "primary", "api_key": "k1", "base_url": "http://x", "model": "primary-model"},

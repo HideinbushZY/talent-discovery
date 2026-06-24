@@ -57,6 +57,24 @@ def _llm_providers() -> list:
 
 LLM_PROVIDERS = _llm_providers()
 
+# 阶段3 复核/打分用**更快的非思考模型**（复核是批量判断，不需深度思考）——
+# 把 stage 3 从几分钟压到几十秒。阶段1 难题理解仍用 kimi-k2.6 保证路由质量。
+LLM_REVIEW_MODEL = os.getenv("LLM_REVIEW_MODEL", "moonshot-v1-128k").strip()
+
+
+def _review_providers() -> list:
+    out = []
+    if KIMI_API_KEY and LLM_REVIEW_MODEL:
+        out.append({"name": f"kimi:{LLM_REVIEW_MODEL}", "api_key": KIMI_API_KEY,
+                    "base_url": KIMI_BASE_URL, "model": LLM_REVIEW_MODEL})
+    for p in LLM_PROVIDERS:        # 复核模型失败时回退到主供应商（含 kimi-k2.6）
+        if p["model"] != LLM_REVIEW_MODEL:
+            out.append(p)
+    return out
+
+
+LLM_REVIEW_PROVIDERS = _review_providers()
+
 # ── 成本 / 范围控制 ───────────────────────────────────────────
 X_READ_BUDGET = _int("X_READ_BUDGET", 300)        # 每次搜索 X 帖子读取上限
 X_SESSION_READ_CAP = _int("X_SESSION_READ_CAP", 3000)  # 进程级 X 读取总上限（防失控，~$15）
@@ -83,6 +101,7 @@ def summary() -> dict:
         "llm_base_url": KIMI_BASE_URL,
         "llm_model": KIMI_MODEL,
         "llm_providers": [p["name"] for p in LLM_PROVIDERS],
+        "llm_review_model": LLM_REVIEW_MODEL,
         "x_read_budget": X_READ_BUDGET,
         "top_n_per_channel": TOP_N_PER_CHANNEL,
     }

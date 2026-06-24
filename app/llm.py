@@ -24,13 +24,16 @@ _resolve_lock: Optional[asyncio.Lock] = None
 
 
 async def _chat_json(system: str, user: str, max_tokens: int = 2500,
-                     retries: int = 2) -> Dict[str, Any]:
-    """强制 JSON 输出并解析为 dict。多供应商兜底：主供应商耗尽重试后降级到下一个。"""
-    providers = config.LLM_PROVIDERS
+                     retries: int = 2, providers: list | None = None) -> Dict[str, Any]:
+    """强制 JSON 输出并解析为 dict。多供应商兜底：主供应商耗尽重试后降级到下一个。
+
+    providers 可覆盖（如复核阶段传入更快的非思考模型）；默认用 config.LLM_PROVIDERS。
+    """
+    providers = providers if providers is not None else config.LLM_PROVIDERS
     if not providers:
         raise RuntimeError("未配置任何 LLM 供应商（KIMI_API_KEY）")
     last_err: Exception | None = None
-    async with httpx.AsyncClient(timeout=200) as client:
+    async with httpx.AsyncClient(timeout=120) as client:
         for pi, prov in enumerate(providers):
             try:
                 return await _chat_one(client, prov, system, user, max_tokens, retries)
@@ -272,7 +275,9 @@ async def _review_batch(problem, subproblems, channel, candidates) -> Dict[str, 
     user = (f"难题：{problem}\n子问题：{', '.join(subproblems)}\n\n候选人（每行一个 JSON）：\n"
             + "\n".join(lines))
     try:
-        data = await _chat_json(system, user, max_tokens=6000)
+        # 复核走更快的非思考模型（config.LLM_REVIEW_PROVIDERS），失败回退到主供应商
+        data = await _chat_json(system, user, max_tokens=6000,
+                                providers=config.LLM_REVIEW_PROVIDERS)
     except Exception:
         return {}
     out: Dict[str, Dict[str, Any]] = {}
