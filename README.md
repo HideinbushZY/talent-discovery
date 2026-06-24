@@ -95,9 +95,14 @@ railway down                       # 下线（删除部署）
 ## API
 
 - `GET /` — 单页前端（零构建）
-- `GET /api/search/stream?problem=...` — **SSE** 实时回传进度 + 最终结果（前端用）
-- `POST /api/search {"problem": "..."}` — 非流式，跑完返回完整 JSON（脚本/测试用）
+- `POST /api/search {"problem": "..."}` → `{"job_id": "..."}` — 建**后台作业**，立即返回（不阻塞）
+- `GET /api/search/{job_id}` — 轮询/恢复：作业状态 + 最终结果（内存没有则查库）
+- `GET /api/search/{job_id}/stream` — **SSE** 续传进度（支持 `Last-Event-ID` 断点续传 + 心跳保活）
 - `GET /api/health` — 配置 + 模型自检
+
+> **Phase B 架构**：搜索是后台作业——管线 detached 跑完、结果落库（SQLite，见 `app/store.py`），
+> 客户端断开/代理空闲超时**都不丢结果**：SSE 自动重连续传、轮询兜底、刷新页面也能用 job_id 取回。
+> 这解决了"130–290 秒长请求被代理掐断"的问题。多实例/水平扩展再把内存注册表+SQLite 换成 Redis/Postgres。
 
 > 设置 `APP_PASSWORD` 后，以上所有接口都需 HTTP Basic Auth（用户名任意 / 密码=口令）；浏览器 EventSource 在页面登录后会自动带上凭证。
 
@@ -119,7 +124,9 @@ railway down                       # 下线（删除部署）
 
 ```
 app/
-  main.py          FastAPI：SSE / POST / health / 静态
+  main.py          FastAPI：作业化搜索（POST建作业/GET取结果/SSE续传）+ health + 静态
+  jobs.py          作业管理：把长流水线从 HTTP 请求解耦（后台跑、累积事件、落库）
+  store.py         结果持久化（SQLite，stdlib；多实例换 Postgres）
   pipeline.py      四阶段编排（异步生成器，流式进度）
   llm.py           Kimi/Moonshot（OpenAI 兼容，JSON 模式）：分型路由 + 相关性复核 + 画像
   config.py        .env 读取 + 成本/范围配置

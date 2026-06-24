@@ -15,5 +15,6 @@ __pycache__/
 # local editor / tooling config (machine-specific)
 .claude/
 
-# runtime cache
+# runtime cache / 持久化数据
 .cache/
+data/

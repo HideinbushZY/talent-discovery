@@ -1,33 +1,36 @@
-"""FastAPI 入口：SSE 流式搜索 + 非流式 POST + 健康检查 + 静态前端。
+"""FastAPI 入口：作业化搜索（POST 建作业 / GET 取结果 / SSE 续传）+ 健康检查 + 静态前端。
 
 公网安全：设置环境变量 APP_PASSWORD 后，所有页面/接口走 HTTP Basic Auth
 （用户名任意，密码 = APP_PASSWORD）。未设置则本地开放（仅供本机开发）。
+
+Phase B：搜索是**后台作业**——客户端断开/代理超时不影响作业，结果落库可重取。
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
 from . import config, llm
 from . import observability as obs
-from .pipeline import run_pipeline, run_to_result
+from .jobs import manager as jobs
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 
-# 启动即配置结构化日志 + 可选 Sentry
 obs.setup_logging()
 obs.init_sentry()
 obs.get_logger("startup").info("talent-discovery 启动 | 配置=%s" % config.summary())
 
 _basic = HTTPBasic(auto_error=False)
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"}
 
 
 def require_auth(creds: Optional[HTTPBasicCredentials] = Depends(_basic)):
@@ -41,8 +44,7 @@ def require_auth(creds: Optional[HTTPBasicCredentials] = Depends(_basic)):
                             headers={"WWW-Authenticate": 'Basic realm="talent-discovery"'})
 
 
-# 全局依赖：每个请求都先过鉴权
-app = FastAPI(title="从问题出发的人才发现", version="1.0",
+app = FastAPI(title="从问题出发的人才发现", version="2.0",
               dependencies=[Depends(require_auth)])
 
 
@@ -63,29 +65,70 @@ async def health():
     return out
 
 
-@app.get("/api/search/stream")
-async def search_stream(problem: str):
-    """SSE：实时回传进度与最终结果。前端用 EventSource 消费。"""
-    async def gen():
-        try:
-            async for ev in run_pipeline(problem):
-                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
-        except Exception as e:  # noqa: BLE001
-            yield f"data: {json.dumps({'type':'error','message':str(e)}, ensure_ascii=False)}\n\n"
-        yield "data: {\"type\":\"close\"}\n\n"
-
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-
-
 @app.post("/api/search")
-async def search(body: SearchBody):
-    """非流式：跑完返回完整结果（API/测试用）。"""
-    try:
-        result = await run_to_result(body.problem)
-        return JSONResponse(result)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"error": str(e)}, status_code=500)
+async def create_search(body: SearchBody):
+    """建一个后台搜索作业，立即返回 job_id（不阻塞）。"""
+    if not (body.problem or "").strip():
+        return JSONResponse({"error": "problem 不能为空"}, status_code=400)
+    job_id = jobs.create(body.problem.strip())
+    return {"job_id": job_id}
+
+
+@app.get("/api/search/{job_id}")
+async def get_search(job_id: str):
+    """轮询/恢复：返回作业状态 + 最终结果（内存没有则查库）。"""
+    data = await jobs.status_view(job_id)
+    if not data:
+        return JSONResponse({"error": "job not found"}, status_code=404)
+    return data
+
+
+def _sse(idx: int, ev: dict) -> str:
+    return f"id: {idx}\ndata: {json.dumps(ev, ensure_ascii=False)}\n\n"
+
+
+@app.get("/api/search/{job_id}/stream")
+async def stream_search(job_id: str, request: Request):
+    """SSE：从 Last-Event-ID 续传作业事件 + 静默期心跳保活，直到 close。"""
+    job = jobs.get(job_id)
+    if job is None:
+        # 内存里没有（可能进程重启过）→ 从库里一次性返回最终结果
+        data = await jobs.status_view(job_id)
+
+        async def once():
+            if data and data.get("result"):
+                yield _sse(0, {"type": "done", "result": data["result"]})
+            elif data and data.get("status") == "error":
+                yield _sse(0, {"type": "error", "message": data.get("error") or "失败"})
+            else:
+                yield _sse(0, {"type": "error", "message": "job not found"})
+            yield _sse(1, {"type": "close"})
+        return StreamingResponse(once(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+    last = request.headers.get("Last-Event-ID")
+    start = int(last) + 1 if (last and last.isdigit()) else 0
+
+    async def gen():
+        idx = start
+        quiet = 0
+        while True:
+            advanced = False
+            while idx < len(job.events):
+                ev = job.events[idx]
+                yield _sse(idx, ev)
+                idx += 1
+                advanced = True
+                if ev.get("type") == "close":
+                    return
+            if advanced:
+                quiet = 0
+                continue
+            await asyncio.sleep(1)
+            quiet += 1
+            if quiet % 8 == 0:        # 每 ~8 秒发一个心跳注释，防代理空闲超时
+                yield ": ping\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 @app.get("/")
