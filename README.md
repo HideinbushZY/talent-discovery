@@ -118,6 +118,7 @@ app/
   models.py        统一 pydantic schema
   scoring.py       打分函数 + 可挖性启发式
   cache.py         TTL 缓存 + 限速 + 限并发
+  observability.py 结构化日志 + 每次搜索 trace（耗时/降级）+ 可选 Sentry
   connectors/
     base.py        通道连接器接口（可插拔，便于加 LinkedIn/Substack…）
     github.py      GitHubConnector（混合策略）
@@ -143,6 +144,8 @@ evals/             阶段1 路由质量评测（golden set + runner）
 
 - `tests/`：评分公式、权重归一化、JSON 解析、缓存/限速、连接器解析，以及**整条管线的集成测试**（双通道排序、GitHub 诚实跳过、experimental 提示、LLM 失败兜底）。
 - `evals/golden_set.json`：一组难题 + 期望的 category / maturity / 逐通道适用性，作为改 prompt 或换模型后的**回归门槛**。往里加例子即可扩大覆盖。
+
+**可观测性**：每次搜索在日志里留**一行结构化 JSON**（`search.done`）——含 `request_id`、各阶段耗时、降级事件、X 读取数、模型。`request_id` 也回传到结果 `meta` 并显示在页面，便于和日志对账。降级（LLM 兜底、通道出错、复核失败、限速）走 `WARNING`。配 `SENTRY_DSN` 可把异常上报 Sentry。
 
 **CI（GitHub Actions）**：
 - `.github/workflows/ci.yml` —— 每次 push / PR 自动跑 `pytest`（不触网、不需密钥）。

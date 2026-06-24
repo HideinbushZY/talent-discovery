@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any, Dict, List, Optional
 
 import httpx
 
 from . import config
+from . import observability as obs
 
+_LOG = obs.get_logger("llm")
 _resolved_model: Optional[str] = None
 _resolve_lock: Optional[asyncio.Lock] = None
 
@@ -56,9 +59,14 @@ async def _chat_json(system: str, user: str, max_tokens: int = 2500,
                 return _parse_json(content)
             except Exception as e:  # noqa: BLE001
                 last_err = e
-                budget = min(int(budget * 1.6), 16000)   # 下次给更大预算
+                next_budget = min(int(budget * 1.6), 16000)   # 下次给更大预算
                 if attempt < retries:
+                    obs.log(_LOG, logging.WARNING, "kimi_retry", attempt=attempt + 1,
+                            error=str(e)[:100], next_budget=next_budget)
+                    budget = next_budget
                     await asyncio.sleep(0.6 * (attempt + 1))
+                else:
+                    budget = next_budget
     raise last_err if last_err else RuntimeError("Kimi 调用失败")
 
 

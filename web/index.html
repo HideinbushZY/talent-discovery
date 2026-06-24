@@ -211,7 +211,9 @@ function renderAnalysis(r){
       <span>🧠 ${esc(model)}</span>
       <span>📖 X 读取 ${r.meta?.x_reads_used||0} 条</span>
       <span>候选池 ${r.meta?.total_candidates||0} 人 → 总榜 ${state.candidates.length}</span>
-    </div>`;
+      ${r.meta?.request_id ? `<span title="可与服务端日志对账">🆔 ${esc(r.meta.request_id)}</span>` : ''}
+    </div>
+    ${(r.meta?.degradations||[]).length ? `<div class="text-[11px] text-amber-600 mt-1.5">⚠ 降级：${(r.meta.degradations).map(esc).join('、')}</div>` : ''}`;
 }
 
 function renderChannels(r){

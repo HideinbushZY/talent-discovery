@@ -16,10 +16,16 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
 from . import config, llm
+from . import observability as obs
 from .pipeline import run_pipeline, run_to_result
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
+
+# 启动即配置结构化日志 + 可选 Sentry
+obs.setup_logging()
+obs.init_sentry()
+obs.get_logger("startup").info("talent-discovery 启动 | 配置=%s" % config.summary())
 
 _basic = HTTPBasic(auto_error=False)
 

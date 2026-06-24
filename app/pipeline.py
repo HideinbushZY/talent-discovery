@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any, AsyncIterator, Dict, List
 
 from . import config, llm, scoring
+from . import observability as obs
 from .connectors.github import GitHubConnector
 from .connectors.x import XConnector
 from .models import Candidate, ChannelReport, SearchResult
@@ -24,16 +24,21 @@ async def run_pipeline(problem: str) -> AsyncIterator[Dict[str, Any]]:
         await queue.put(_event(type="progress", channel=channel, message=message))
 
     async def orchestrate():
-        t0 = time.time()
+        trace = obs.Trace(obs.new_request_id(), problem)
+        trace.started()
         notes: List[str] = []
         try:
             # ── 阶段 1：难题理解 ──────────────────────────────
+            trace.start("analyze")
             await queue.put(_event(type="status", stage=1, message="阶段1：难题理解 + 逐通道路由（Kimi）…"))
             try:
                 analysis = await llm.analyze_problem(problem)
             except Exception as e:  # noqa: BLE001
                 analysis = llm.heuristic_analysis(problem)
                 notes.append(f"⚠ Kimi 难题理解失败，已用启发式兜底（结果偏弱）：{str(e)[:120]}")
+                trace.event("llm_analyze_fallback", error=str(e)[:120])
+                obs.capture_exception(e)
+            trace.end("analyze")
 
             await queue.put(_event(type="analysis", data=analysis))
 
@@ -42,6 +47,7 @@ async def run_pipeline(problem: str) -> AsyncIterator[Dict[str, Any]]:
             x_plan = channels["x"]
 
             # ── 阶段 2：双渠道并行采集（只跑 applicable）────────
+            trace.start("collect")
             await queue.put(_event(type="status", stage=2, message="阶段2：双渠道并行采集（仅适用通道）…"))
 
             tasks = {}
@@ -56,8 +62,21 @@ async def run_pipeline(problem: str) -> AsyncIterator[Dict[str, Any]]:
                     collected[name] = await task
                 except Exception as e:  # noqa: BLE001
                     collected[name] = ([], {"collected": 0, "error": str(e)[:160]})
+            trace.end("collect")
+
+            # trace：逐通道采集结果 / 跳过
+            for ch in ("github", "x"):
+                if ch in collected:
+                    _r = collected[ch][1]
+                    if _r.get("error"):
+                        trace.event("channel_error", channel=ch, error=str(_r["error"])[:120])
+                    else:
+                        trace.event("channel_ok", channel=ch, n=_r.get("collected", 0), degraded=False)
+                elif not channels[ch]["applicable"]:
+                    trace.event("channel_skipped", channel=ch, degraded=False)
 
             # ── 阶段 3：评分与画像 ────────────────────────────
+            trace.start("review_score")
             await queue.put(_event(type="status", stage=3, message="阶段3：相关性复核 + 评分 + 画像（Kimi）…"))
             subproblems = analysis.get("subproblems", [])
             all_cands: List[Dict[str, Any]] = []
@@ -66,6 +85,8 @@ async def run_pipeline(problem: str) -> AsyncIterator[Dict[str, Any]]:
                 if not cands:
                     return []
                 reviews = await llm.review_candidates(problem, subproblems, ch, cands)
+                if not reviews:
+                    trace.event("review_empty", channel=ch)   # 复核全失败 → 走启发式
                 for c in cands:
                     rv = reviews.get(c["id"], {})
                     rel = rv.get("relevance")
@@ -88,6 +109,7 @@ async def run_pipeline(problem: str) -> AsyncIterator[Dict[str, Any]]:
             )
             for group in scored:
                 all_cands.extend(group)
+            trace.end("review_score")
 
             # ── 阶段 4：融合总榜 ──────────────────────────────
             all_cands.sort(key=lambda c: c.get("weighted_score", c["problem_fit_score"]), reverse=True)
@@ -125,6 +147,9 @@ async def run_pipeline(problem: str) -> AsyncIterator[Dict[str, Any]]:
                 notes.append("实验性：这类难题目前主要靠 X 的软证据，结果可能偏弱，仅供参考。")
 
             x_reads = collected.get("x", ([], {}))[1].get("reads_used", 0) if "x" in collected else 0
+            gh_collected = collected.get("github", ([], {}))[1].get("collected", 0) if "github" in collected else 0
+            x_collected = collected.get("x", ([], {}))[1].get("collected", 0) if "x" in collected else 0
+            model = llm._resolved_model or config.KIMI_MODEL
 
             result = SearchResult(
                 problem=problem,
@@ -136,17 +161,20 @@ async def run_pipeline(problem: str) -> AsyncIterator[Dict[str, Any]]:
                 candidates=[Candidate(**c) for c in top],
                 notes=notes,
                 meta={
-                    "elapsed_sec": round(time.time() - t0, 1),
-                    "model": llm._resolved_model or config.KIMI_MODEL,
+                    "elapsed_sec": trace.elapsed(),
+                    "model": model,
                     "x_reads_used": x_reads,
                     "total_candidates": len(all_cands),
                     "plan": {"github": gh_plan, "x": x_plan},
+                    **trace.meta(),     # request_id, stages_sec, degradations
                 },
             )
+            trace.done(category=analysis["category"], maturity=analysis["maturity"],
+                       domain=analysis["domain"], candidates=len(top), total=len(all_cands),
+                       github=gh_collected, x=x_collected, x_reads=x_reads, model=model)
             await queue.put(_event(type="done", result=result.model_dump()))
         except Exception as e:  # noqa: BLE001
-            import traceback
-            traceback.print_exc()  # 堆栈只进服务端日志，不回传客户端
+            trace.error(e)          # 结构化日志 + Sentry（堆栈不回传客户端）
             await queue.put(_event(type="error", message=str(e)))
         finally:
             await queue.put(_SENTINEL)
