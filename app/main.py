@@ -61,6 +61,14 @@ class FeedbackBody(BaseModel):
     problem: str = ""
 
 
+class SessionFeedbackBody(BaseModel):
+    job_id: str
+    useful: str = ""        # 很有用 | 一般 | 没用
+    would_use: str = ""     # 会 | 可能 | 不会
+    comment: str = ""
+    problem: str = ""
+
+
 @app.get("/api/health")
 async def health():
     out = {"ok": True, "auth": bool(config.APP_PASSWORD),
@@ -152,10 +160,27 @@ async def submit_feedback(body: FeedbackBody):
     return {"ok": ok}
 
 
+@app.post("/api/session-feedback")
+async def submit_session_feedback(body: SessionFeedbackBody):
+    """整体评价：这次搜索是否有用 / 会不会真用它（衡量"用法是否接受"）。"""
+    ok = await store.save_session_feedback(body.job_id, body.problem[:200],
+                                           body.useful[:20], body.would_use[:20], body.comment[:500])
+    obs.log(obs.get_logger("feedback"), 20, "session_feedback",
+            useful=body.useful, would_use=body.would_use)
+    return {"ok": ok}
+
+
 @app.get("/api/feedback")
 async def get_feedback(limit: int = 500):
-    """给项目方回看内测反馈（受 Basic Auth 保护）。"""
-    return {"items": await store.list_feedback(limit)}
+    """给项目方回看内测反馈（候选级 + 整体级，受 Basic Auth 保护）。"""
+    return {"items": await store.list_feedback(limit),
+            "sessions": await store.list_session_feedback(limit)}
+
+
+@app.get("/api/feedback/summary")
+async def feedback_summary():
+    """两个内测核心指标的汇总：结果准不准（命中率）+ 用法是否接受。"""
+    return await store.summary()
 
 
 @app.get("/")

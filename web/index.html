@@ -13,6 +13,9 @@
     @keyframes fade { from { opacity: 0; transform: translateY(6px);} to {opacity:1; transform:none;} }
     .scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
     .scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .sfb { font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid #e2e8f0; color: #475569; background: #fff; cursor: pointer; transition: all .12s; }
+    .sfb:hover { background: #f8fafc; }
+    .sfb.active { border-color: #6ee7b7; background: #d1fae5; color: #047857; }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen">
@@ -111,6 +114,27 @@
 
       <!-- Leaderboard -->
       <div id="list" class="space-y-2.5"></div>
+
+      <!-- 整体评价（用法是否接受）-->
+      <div id="session-fb" class="hidden mt-6 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+        <div class="text-sm font-medium text-slate-700 mb-2.5">整体评价 <span class="text-xs font-normal text-slate-400">（帮我们改进，可选）</span></div>
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+          <span class="text-slate-500">这次结果有用吗?</span>
+          <div class="flex gap-1.5">
+            <button class="sfb" data-k="useful" data-v="很有用">很有用</button>
+            <button class="sfb" data-k="useful" data-v="一般">一般</button>
+            <button class="sfb" data-k="useful" data-v="没用">没用</button>
+          </div>
+          <span class="text-slate-500 ml-1">会用它真招人吗?</span>
+          <div class="flex gap-1.5">
+            <button class="sfb" data-k="would_use" data-v="会">会</button>
+            <button class="sfb" data-k="would_use" data-v="可能">可能</button>
+            <button class="sfb" data-k="would_use" data-v="不会">不会</button>
+          </div>
+        </div>
+        <input id="session-comment" class="mt-3 w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-emerald-400" placeholder="还有什么想说的?（哪里准/哪里不准、用法顺不顺手…）">
+        <div id="session-thanks" class="hidden text-xs text-emerald-600 mt-2">已记录，谢谢！</div>
+      </div>
     </div>
   </div>
 
@@ -145,7 +169,7 @@ async function startSearch(){
   const p = $('#problem').value.trim();
   if(!p) return;
   cleanup();
-  state = { candidates: [], result: null, jobId: null, finished: false, feedback: {} };
+  state = { candidates: [], result: null, jobId: null, finished: false, feedback: {}, session: {} };
   $('#results').classList.add('hidden');
   $('#error').classList.add('hidden');
   $('#progress').classList.remove('hidden');
@@ -230,7 +254,25 @@ function finish(result){
     $('#exp-text').textContent = expNote.replace(/^实验性[:：]?\s*/, '');
   }
   renderList();
+  showSessionFb();
   $('#results').classList.remove('hidden');
+}
+
+function showSessionFb(){
+  state.session = {};
+  $('#session-comment').value = '';
+  $('#session-thanks').classList.add('hidden');
+  $('#session-fb').querySelectorAll('.sfb').forEach(b => b.classList.remove('active'));
+  $('#session-fb').classList.remove('hidden');
+}
+
+async function submitSession(){
+  try {
+    await fetch('/api/session-feedback', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({job_id: state.jobId, useful: state.session.useful||'', would_use: state.session.would_use||'',
+        comment: $('#session-comment').value, problem: (state.result&&state.result.problem)||''})});
+    $('#session-thanks').classList.remove('hidden');
+  } catch(_){}
 }
 
 function renderAnalysis(r){
@@ -390,6 +432,8 @@ $('#problem').addEventListener('keydown', (e)=>{ if((e.metaKey||e.ctrlKey) && e.
 document.querySelectorAll('.example').forEach(b=> b.addEventListener('click', ()=>{ $('#problem').value = b.dataset.q; startSearch(); }));
 ['filter-source','filter-strength','filter-cn','sort'].forEach(id=> $('#'+id).addEventListener('change', renderList));
 $('#list').addEventListener('click', (e)=>{ const b = e.target.closest('.fb-btn'); if(b) submitFeedback(b.dataset.cid, b.dataset.vote); });
+$('#session-fb').addEventListener('click', (e)=>{ const b = e.target.closest('.sfb'); if(!b) return; state.session[b.dataset.k] = b.dataset.v; b.parentElement.querySelectorAll('.sfb').forEach(x=> x.classList.remove('active')); b.classList.add('active'); submitSession(); });
+$('#session-comment').addEventListener('blur', ()=>{ if(state.session.useful || state.session.would_use || $('#session-comment').value.trim()) submitSession(); });
 </script>
 </body>
 </html>

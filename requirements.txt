@@ -3,3 +3,4 @@ uvicorn[standard]>=0.27
 httpx>=0.27
 python-dotenv>=1.0
 pydantic>=2.6
+psycopg2-binary>=2.9        # 仅生产用 Postgres（设了 DATABASE_URL 才加载）

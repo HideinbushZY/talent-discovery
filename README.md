@@ -99,13 +99,15 @@ railway down                       # 下线（删除部署）
 - `POST /api/search {"problem": "..."}` → `{"job_id": "..."}` — 建**后台作业**，立即返回（不阻塞）
 - `GET /api/search/{job_id}` — 轮询/恢复：作业状态 + 最终结果（内存没有则查库）
 - `GET /api/search/{job_id}/stream` — **SSE** 续传进度（支持 `Last-Event-ID` 断点续传 + 心跳保活）
-- `POST /api/feedback {"job_id","candidate_id","vote":"up|down","comment","problem"}` — 内测反馈（每候选一条，可覆盖）
-- `GET /api/feedback` — 回看所有内测反馈（项目方用，受 Basic Auth 保护）
+- `POST /api/feedback {"job_id","candidate_id","vote":"up|down","comment","problem"}` — 候选反馈（衡量"结果准不准"）
+- `POST /api/session-feedback {"job_id","useful","would_use","comment","problem"}` — 整体评价（衡量"用法是否接受"）
+- `GET /api/feedback` — 回看所有反馈（候选级 + 整体级，受 Basic Auth 保护）
+- `GET /api/feedback/summary` — **两个内测核心指标汇总**：命中率 + 用法接受度
 - `GET /api/health` — 配置 + 模型自检
 
-> **Phase B 架构**：搜索是后台作业——管线 detached 跑完、结果落库（SQLite，见 `app/store.py`），
-> 客户端断开/代理空闲超时**都不丢结果**：SSE 自动重连续传、轮询兜底、刷新页面也能用 job_id 取回。
-> 这解决了"130–290 秒长请求被代理掐断"的问题。多实例/水平扩展再把内存注册表+SQLite 换成 Redis/Postgres。
+> **Phase B 架构**：搜索是后台作业——管线 detached 跑完、结果落库，客户端断开/代理空闲超时**都不丢结果**
+> （SSE 自动重连续传、轮询兜底、刷新页面也能用 job_id 取回）。解决了"130–290 秒长请求被代理掐断"。
+> **持久化**：本地/测试用 SQLite；生产设 `DATABASE_URL` 即用 **Postgres**（结果+反馈**跨部署/重启不丢**，见 `app/store.py`）。多实例水平扩展再把内存作业注册表换成 Redis。
 
 > 设置 `APP_PASSWORD` 后，以上所有接口都需 HTTP Basic Auth（用户名任意 / 密码=口令）；浏览器 EventSource 在页面登录后会自动带上凭证。
 

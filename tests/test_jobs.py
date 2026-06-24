@@ -70,6 +70,21 @@ async def test_feedback_save_list_and_upsert(monkeypatch, tmp_path):
     assert a["vote"] == "down" and a["comment"] == "改主意了"
 
 
+async def test_session_feedback_and_summary(monkeypatch, tmp_path):
+    monkeypatch.setattr(store, "DB_PATH", tmp_path / "ses.db")
+    monkeypatch.setattr(store, "_conn", None)
+    await store.save_feedback("j1", "github:a", "难题", "up", "")
+    await store.save_feedback("j1", "github:b", "难题", "down", "")
+    await store.save_session_feedback("j1", "难题", "很有用", "会", "好用")
+    await store.save_session_feedback("j1", "难题", "一般", "可能", "")   # 覆盖同一 job
+    sess = await store.list_session_feedback()
+    assert len(sess) == 1 and sess[0]["useful"] == "一般"
+    s = await store.summary()
+    assert s["结果准不准"]["命中率"] == 0.5      # 1 up / 2 voted
+    assert s["用法是否接受"]["sessions"] == 1
+    assert s["backend"] == "sqlite"
+
+
 async def test_status_view_falls_back_to_store(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "DB_PATH", tmp_path / "s.db")
     monkeypatch.setattr(store, "_conn", None)
