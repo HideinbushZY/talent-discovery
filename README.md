@@ -58,8 +58,14 @@ railway down                       # 下线（删除部署）
 | `KIMI_MODEL` | 模型名 | 当前 `kimi-k2.6`（也可 `kimi-k2.5` / `moonshot-v1-128k`） |
 | `APP_PASSWORD` | 公网访问口令（用户名任意/密码=此值） | 自定义；公网部署必填 |
 | `X_READ_BUDGET` | 每次搜索 X 读取上限（先小后大） | 默认 `300` |
+| `X_SESSION_READ_CAP` | 进程级 X 读取总上限（防失控，约 $15 触顶即停） | 默认 `3000` |
 | `TOP_N_PER_CHANNEL` | 每通道进入评分的候选数 | 默认 `40` |
+| `LLM_FALLBACK_MODEL` | 主模型失败后的兜底模型（同 key） | 默认 `moonshot-v1-128k`（非思考、更稳） |
+| `LOG_FORMAT` / `LOG_LEVEL` | 日志格式 / 级别 | `json`（默认）/ `INFO` |
+| `SENTRY_DSN` | 异常上报（需另装 `sentry-sdk`） | 选填 |
 
+> 完整变量（含第三方供应商兜底 `LLM_FALLBACK_API_KEY` / `_BASE_URL` / `_PROVIDER_MODEL`、`PORT` 等）见 `.env.example`。
+>
 > 注意：`kimi-k2.6` 默认开启 thinking，与强制具名 tool_choice 不兼容，故 LLM 层用 JSON 输出模式约束结构（见 `app/llm.py`）。
 > 健康检查：`curl -u u:口令 localhost:8848/api/health` 会返回脱敏配置 + 探测到的模型，便于排错。
 
@@ -92,6 +98,8 @@ railway down                       # 下线（删除部署）
 - `GET /api/search/stream?problem=...` — **SSE** 实时回传进度 + 最终结果（前端用）
 - `POST /api/search {"problem": "..."}` — 非流式，跑完返回完整 JSON（脚本/测试用）
 - `GET /api/health` — 配置 + 模型自检
+
+> 设置 `APP_PASSWORD` 后，以上所有接口都需 HTTP Basic Auth（用户名任意 / 密码=口令）；浏览器 EventSource 在页面登录后会自动带上凭证。
 
 候选人统一 schema 见 `app/models.py`（`Candidate`）。
 
