@@ -1,5 +1,7 @@
 # 从问题出发的人才发现 (Talent Discovery, v1 Demo)
 
+[![CI](https://github.com/HideinbushZY/talent-discovery/actions/workflows/ci.yml/badge.svg)](https://github.com/HideinbushZY/talent-discovery/actions/workflows/ci.yml)
+
 输入一个**企业的难题**，系统把它翻译成可检索的信号，在 **GitHub**（动手实现/构建过这类问题的人）和 **X / Twitter**（在这类问题上最前沿、最有话语权的人）两个渠道**诚实地**并行找人，产出一个**融合总榜 dashboard**——没有对应人才的通道会如实跳过并说明。
 
 全程**实时**调用：GitHub REST/Code Search + X API v2 + Kimi（Moonshot）。
@@ -122,7 +124,29 @@ app/
     x.py           XConnector（读取预算 + 聚合作者）
 web/
   index.html       Tailwind CDN + 原生 JS 的融合总榜 dashboard
+tests/             pytest 单元 + 集成测试（不触网、不花钱）
+evals/             阶段1 路由质量评测（golden set + runner）
 ```
+
+## 测试与评测
+
+```bash
+# 安装开发依赖
+./.venv/bin/pip install -r requirements-dev.txt
+
+# 单元 + 集成测试（mock 掉 GitHub/X/Kimi，确定性、秒级、零成本）
+./.venv/bin/python -m pytest
+
+# 阶段1 路由质量评测（会调用真实 Kimi，需 KIMI_API_KEY）
+./.venv/bin/python -m evals.run_eval
+```
+
+- `tests/`：评分公式、权重归一化、JSON 解析、缓存/限速、连接器解析，以及**整条管线的集成测试**（双通道排序、GitHub 诚实跳过、experimental 提示、LLM 失败兜底）。
+- `evals/golden_set.json`：一组难题 + 期望的 category / maturity / 逐通道适用性，作为改 prompt 或换模型后的**回归门槛**。往里加例子即可扩大覆盖。
+
+**CI（GitHub Actions）**：
+- `.github/workflows/ci.yml` —— 每次 push / PR 自动跑 `pytest`（不触网、不需密钥）。
+- `.github/workflows/eval.yml` —— **手动触发**的路由评测（调用真实 Kimi）。需在仓库 `Settings → Secrets and variables → Actions` 添加 `KIMI_API_KEY`。
 
 ## v1 不做（后续迭代）
 

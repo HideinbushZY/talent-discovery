@@ -1,0 +1,26 @@
+name: Routing eval (manual)
+
+# 阶段1 路由质量评测：会调用真实 Kimi（花钱），所以只手动触发，
+# 且需要在仓库 Settings → Secrets → Actions 里配置 KIMI_API_KEY。
+on:
+  workflow_dispatch:
+
+jobs:
+  eval:
+    name: 阶段1 路由评测
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements-dev.txt
+
+      - name: 跑路由评测
+        env:
+          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+        run: python -m evals.run_eval

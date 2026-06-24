@@ -20,32 +20,46 @@ _resolved_model: Optional[str] = None
 _resolve_lock: Optional[asyncio.Lock] = None
 
 
-async def _chat_json(system: str, user: str, max_tokens: int = 2500) -> Dict[str, Any]:
+async def _chat_json(system: str, user: str, max_tokens: int = 2500,
+                     retries: int = 2) -> Dict[str, Any]:
     """调用 Kimi chat/completions，强制 JSON 输出并解析为 dict。
 
     kimi-k2.6（thinking 模型）只接受 temperature=1，故不传该参数用默认值。
+    韧性：失败/空内容/解析错时重试，并**提高 token 预算**（空内容多半是 thinking 把
+    预算吃光），带退避。retries=0 可关闭重试（测试用）。
     """
     if not config.KIMI_API_KEY:
         raise RuntimeError("未配置 KIMI_API_KEY")
-    payload = {
-        "model": config.KIMI_MODEL,
-        "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    }
     headers = {"Authorization": f"Bearer {config.KIMI_API_KEY}",
                "Content-Type": "application/json"}
+    budget = max_tokens
+    last_err: Exception | None = None
     async with httpx.AsyncClient(timeout=200) as client:
-        r = await client.post(f"{config.KIMI_BASE_URL}/chat/completions",
-                              headers=headers, json=payload)
-        if r.status_code != 200:
-            raise RuntimeError(f"Kimi API {r.status_code}: {r.text[:160]}")
-        data = r.json()
-    content = data["choices"][0]["message"].get("content") or ""
-    return _parse_json(content)
+        for attempt in range(retries + 1):
+            payload = {
+                "model": config.KIMI_MODEL,
+                "max_tokens": budget,
+                "response_format": {"type": "json_object"},
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            }
+            try:
+                r = await client.post(f"{config.KIMI_BASE_URL}/chat/completions",
+                                      headers=headers, json=payload)
+                if r.status_code != 200:
+                    raise RuntimeError(f"Kimi API {r.status_code}: {r.text[:160]}")
+                content = r.json()["choices"][0]["message"].get("content") or ""
+                if not content.strip():
+                    raise RuntimeError("模型返回空内容（可能 thinking 占满 token）")
+                return _parse_json(content)
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                budget = min(int(budget * 1.6), 16000)   # 下次给更大预算
+                if attempt < retries:
+                    await asyncio.sleep(0.6 * (attempt + 1))
+    raise last_err if last_err else RuntimeError("Kimi 调用失败")
 
 
 def _parse_json(text: str) -> Dict[str, Any]:

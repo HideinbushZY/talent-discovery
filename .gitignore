@@ -1,5 +1,7 @@
-# secrets — never commit real keys
+# secrets — never commit real keys（.env / .env.bak / .env.local 等，但保留 .env.example）
 .env
+.env.*
+!.env.example
 
 # python
 .venv/

@@ -1,0 +1,18 @@
+[
+  {"problem": "我们的 RAG 系统在 1 亿+ 向量规模下检索太慢。",
+   "category": "technical", "maturity": "well_supported", "github_applicable": true, "x_applicable": true},
+  {"problem": "我们的品牌在年轻用户里没有辨识度、缺记忆点。",
+   "category": "marketing", "maturity": "well_supported", "github_applicable": false, "x_applicable": true},
+  {"problem": "我们远程团队跨时区协作效率低、交付总延期。",
+   "category": "other", "maturity": "experimental", "x_applicable": true},
+  {"problem": "我们的 Kubernetes 集群在高负载下频繁 OOM、调度不稳定。",
+   "category": "technical", "maturity": "well_supported", "github_applicable": true, "x_applicable": true},
+  {"problem": "我们在做能理解用户意图的 AI 耳机，意图识别准确率上不去。",
+   "category": "technical", "maturity": "well_supported", "github_applicable": true, "x_applicable": true},
+  {"problem": "我们的电商转化率持续下滑，用户加购后大量流失。",
+   "category": "other", "maturity": "experimental", "x_applicable": true},
+  {"problem": "给一款新咖啡品牌做有传播力的视觉与内容营销。",
+   "category": "marketing", "maturity": "well_supported", "github_applicable": false, "x_applicable": true},
+  {"problem": "自研编译器的寄存器分配在大函数上编译耗时爆炸。",
+   "category": "technical", "maturity": "well_supported", "github_applicable": true, "x_applicable": true}
+]

@@ -7,3 +7,11 @@ __pycache__/
 .DS_Store
 .cache/
 .pytest_cache/
+
+# 测试/评测代码不进生产镜像
+tests/
+evals/
+conftest.py
+pytest.ini
+requirements-dev.txt
+.github/
