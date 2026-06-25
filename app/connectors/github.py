@@ -201,7 +201,7 @@ class GitHubConnector(Connector):
 
             # B2. AI 提名的领域关键人 —— 逐个用 GitHub API 核实并并入
             # （把"发现"从'种子仓库 top 贡献者'扩展到'LLM 的知识'；编造的 handle 会被核实丢弃）
-            known = [p for p in plan.get("known_people", []) if isinstance(p, dict)][:8]
+            known = [p for p in plan.get("known_people", []) if isinstance(p, dict)][:10]
             if known:
                 await progress("github", f"核实 AI 提名的 {len(known)} 位领域关键人…")
 

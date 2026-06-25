@@ -4,4 +4,4 @@ httpx>=0.27
 python-dotenv>=1.0
 pydantic>=2.6
 psycopg2-binary>=2.9        # 仅生产用 Postgres（设了 DATABASE_URL 才加载）
-ddgs>=9.0
+ddgs>=9.0,<10               # 联网发现的免 key 后端；固定大版本，避免默认超时/线程模型漂移

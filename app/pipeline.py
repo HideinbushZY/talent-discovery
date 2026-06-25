@@ -67,14 +67,28 @@ async def run_pipeline(problem: str, china_first: bool = False) -> AsyncIterator
                     await queue.put(_event(type="status", stage=1,
                                            message="阶段1.5：联网发现相关开源仓库…"))
                     try:
-                        extra = await websearch.discover(wq)
-                    except Exception as e:  # noqa: BLE001
+                        # 硬超时上限：联网卡住也不拖累/挂起后台作业（discover 内部已优雅降级）
+                        extra = await asyncio.wait_for(websearch.discover(wq), timeout=25)
+                    except Exception as e:  # noqa: BLE001  含 asyncio.TimeoutError
                         extra = []
-                        trace.event("web_discover_failed", error=str(e)[:120])
-                    seen = set(gh_plan.get("seed_repos", []))
-                    new_repos = [r for r in extra if r not in seen]
+                        trace.event("web_discover_failed", error=(str(e)[:120] or type(e).__name__))
+                    llm_seeds = list(gh_plan.get("seed_repos", []))
+                    seen = {r.lower() for r in llm_seeds}        # 大小写不敏感去重
+                    new_repos: List[str] = []
+                    for r in extra:
+                        if r.lower() not in seen:
+                            seen.add(r.lower())
+                            new_repos.append(r)
                     if new_repos:
-                        gh_plan["seed_repos"] = list(gh_plan.get("seed_repos", [])) + new_repos
+                        # 交错合并：保证联网发现的仓库不会被连接器的 [:N] 截断挤掉
+                        merged: List[str] = []
+                        i = j = 0
+                        while i < len(llm_seeds) or j < len(new_repos):
+                            if i < len(llm_seeds):
+                                merged.append(llm_seeds[i]); i += 1
+                            if j < len(new_repos):
+                                merged.append(new_repos[j]); j += 1
+                        gh_plan["seed_repos"] = merged
                         gh_plan["web_discovered"] = new_repos     # 标记来源，便于展示/排查
                         await progress("github", f"联网发现 {len(new_repos)} 个相关仓库，并入采集")
                     trace.event("web_discovered", n=len(new_repos), degraded=False)

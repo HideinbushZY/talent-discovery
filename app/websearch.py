@@ -28,7 +28,7 @@ _RESERVED_OWNER = {"topics", "search", "sponsors", "about", "features", "marketp
                    "collections", "explore", "trending", "settings", "orgs", "users",
                    "login", "join", "pricing", "site", "apps", "readme", "notifications",
                    "github", "en", "zh", "zh-hans", "code-search", "search-github",
-                   "customer-stories", "enterprise", "security", "sponsors", "contact"}
+                   "customer-stories", "enterprise", "security", "contact"}
 _NON_REPO = {"blob", "tree", "wiki", "issues", "pulls", "releases", "actions", "graphs",
              "stargazers", "explore", "articles", "topics", "search"}
 
@@ -76,22 +76,33 @@ def _ddg_sync(query: str, k: int) -> List[str]:
         return []
 
 
-async def discover(queries: List[str], per_query: int = 6, cap: int = 12) -> List[str]:
-    """对若干查询联网搜索，抽取相关 GitHub owner/repo（去重、限量）。"""
+async def discover(queries: List[str], per_query: int = 6, cap: int = 12,
+                   max_queries: int = 4) -> List[str]:
+    """对若干查询并发联网搜索，抽取相关 GitHub owner/repo（大小写不敏感去重、限量）。
+
+    并发跑各 query（耗时取最慢一条，不再线性叠加）；任一失败优雅降级为空。
+    外层（pipeline）再包一层 asyncio.wait_for 作硬超时上限。
+    """
     if not config.WEB_SEARCH or not queries:
         return []
-    repos: List[str] = []
+    queries = queries[:max_queries]
+
     async with httpx.AsyncClient() as client:
-        for q in queries[:3]:
+        async def one(q: str) -> List[str]:
             try:
                 if config.TAVILY_API_KEY:
-                    texts = await _tavily(client, q, per_query)
-                else:
-                    texts = await asyncio.to_thread(_ddg_sync, q, per_query)
+                    return await _tavily(client, q, per_query)
+                return await asyncio.to_thread(_ddg_sync, q, per_query)
             except Exception as e:  # noqa: BLE001
                 obs.log(_log, 30, "web_search_failed", query=q[:60], error=str(e)[:100])
-                texts = []
-            for full in _extract_repos(texts):
-                if full not in repos:
-                    repos.append(full)
+                return []
+        batches = await asyncio.gather(*[one(q) for q in queries])
+
+    repos: List[str] = []
+    seen = set()                      # 大小写不敏感去重（GitHub 仓库名大小写不敏感）
+    for texts in batches:
+        for full in _extract_repos(texts):
+            if full.lower() not in seen:
+                seen.add(full.lower())
+                repos.append(full)
     return repos[:cap]
