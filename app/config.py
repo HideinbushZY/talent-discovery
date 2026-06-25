@@ -95,6 +95,10 @@ CHINA_FIT_BOOST = _float("CHINA_FIT_BOOST", 30.0)
 X_READ_BUDGET = _int("X_READ_BUDGET", 300)        # 每次搜索 X 帖子读取上限
 X_SESSION_READ_CAP = _int("X_SESSION_READ_CAP", 3000)  # 进程级 X 读取总上限（防失控，~$15）
 TOP_N_PER_CHANNEL = _int("TOP_N_PER_CHANNEL", 40)  # 每通道进入评分的候选数
+# X 渠道定位为"前沿声音/有话语权的人"：相关性低于此阈值的直接丢（质量优先、宁少勿滥）。
+X_RELEVANCE_FLOOR = _float("X_RELEVANCE_FLOOR", 0.6)
+# 中文/中国导向难题跳过 X（目标人才不在 X，实测 ≈0 有效结果，省读取成本）。设 0 关闭门控。
+X_GATE_CHINA = (os.getenv("X_GATE_CHINA", "1").strip().lower() not in ("0", "false", "no", ""))
 PORT = _int("PORT", 8848)
 
 # ── 派生开关 ──────────────────────────────────────────────────

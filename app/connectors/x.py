@@ -30,20 +30,37 @@ def _parse_ts(s: str | None) -> float | None:
         return None
 
 
+# 砍掉低信号/噪音帖：转推、回复、营销/空投/招聘/广告。X 定位"前沿声音"，原创发言才算数。
+_X_FILTERS = "-is:retweet -is:reply -giveaway -airdrop -hiring -promo"
+
+# 诈骗/币圈/带货 bot 信号——任何难题下都不是我们要的"声音"，命中即丢。
+_BIO_SPAM_BASE = ("airdrop", "giveaway", "memecoin", "$btc", "$eth", "crypto trader",
+                  "pump", "shill", "dm for promo", "dm to promote", "dropship")
+# 营销/赚钱/泛内容信号——**技术难题下**算噪音；但**营销难题下它们可能正是目标**，故不进 base。
+_BIO_SPAM_TECH = ("make money", "make $", "passive income", "affiliate", "link in bio",
+                  "web3 content", "promote your", "make money with ai", "make money online", "💰")
+
+
+def _looks_spam(bio: str, category: str = "technical") -> bool:
+    b = bio.lower()
+    spam = _BIO_SPAM_BASE if category == "marketing" else _BIO_SPAM_BASE + _BIO_SPAM_TECH
+    return any(s in b for s in spam)
+
+
 def _build_query(keywords: List[str], phrases: List[str]) -> str:
     terms: List[str] = []
+    for p in phrases[:3]:          # 精确短语优先（最能锁定该领域）
+        p = p.strip()
+        if p:
+            terms.append(f'"{p}"')
     for k in keywords[:6]:
         k = k.strip()
         if not k:
             continue
         terms.append(f'"{k}"' if " " in k else k)
-    for p in phrases[:2]:
-        p = p.strip()
-        if p:
-            terms.append(f'"{p}"')
     if not terms:
         return ""
-    return f"({' OR '.join(terms)}) -is:retweet"
+    return f"({' OR '.join(terms)}) {_X_FILTERS}"
 
 
 def _fmt_metric(n: int) -> str:
@@ -63,6 +80,7 @@ class XConnector(Connector):
     async def collect(self, plan: Dict[str, Any], progress: ProgressCb):
         global _session_reads
         report = {"collected": 0, "error": None, "note": "", "reads_used": 0}
+        category = plan.get("category", "technical")   # 难题类别决定"什么算噪音"
         query = _build_query(plan.get("keywords", []), plan.get("phrases", []))
         if not query:
             report["error"] = "未生成有效检索词"
@@ -153,9 +171,16 @@ class XConnector(Connector):
             u = users.get(aid)
             if not u:
                 continue
+            upm = u.get("public_metrics", {}) or {}
+            bio = (u.get("description") or "").strip()
+            followers = upm.get("followers_count", 0)
+            # 作者质量门：无 bio + 仅一次命中 + 低影响 ≈ 路人/bot，丢弃（X 找的是"有话语权的人"）
+            if not bio and agg["count"] < 2 and followers < 500:
+                continue
+            if _looks_spam(bio, category):     # 按难题类别判噪音（营销难题不误杀营销人）
+                continue
             handle = u.get("username", aid)
             c = new_candidate("x", handle)
-            upm = u.get("public_metrics", {}) or {}
             c["name"] = u.get("name")
             c["bio"] = u.get("description")
             c["location"] = u.get("location")

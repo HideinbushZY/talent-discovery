@@ -17,6 +17,17 @@ def _event(**kw) -> Dict[str, Any]:
     return kw
 
 
+def _china_oriented(problem: str, china_first: bool) -> bool:
+    """难题是否中文/中国导向 —— 这类问题目标人才基本不在 X。
+
+    判定：开了"中国优先"，或问题主要用中文写（含较多汉字）。
+    """
+    if china_first:
+        return True
+    han = sum(1 for ch in problem if "一" <= ch <= "鿿")
+    return han >= 10
+
+
 async def run_pipeline(problem: str, china_first: bool = False) -> AsyncIterator[Dict[str, Any]]:
     queue: asyncio.Queue = asyncio.Queue()
 
@@ -97,10 +108,22 @@ async def run_pipeline(problem: str, china_first: bool = False) -> AsyncIterator
             trace.start("collect")
             await queue.put(_event(type="status", stage=2, message="阶段2：双渠道并行采集（仅适用通道）…"))
 
+            # X 地域门控：中文/中国导向难题，目标人才基本不在 X（技术在 GitHub、营销在小红书/微博）。
+            # 实测三场景均印证此判断 → 跳过 X，省读取成本，也不让 0-2 个弱结果稀释 GitHub。
+            x_gated = (config.X_GATE_CHINA and x_plan["applicable"] and config.HAS_X
+                       and _china_oriented(problem, china_first))
+            if x_gated:
+                trace.event("x_gated_china", degraded=False)
+                if gh_plan["applicable"]:
+                    gh_plan["weight"] = 1.0          # X 跳过 → GitHub 独扛，重置权重
+                x_plan["weight"] = 0.0
+                await progress("x", "中文/中国导向难题：目标人才不在 X，已跳过（省成本，X 更适合全球/英文问题）")
+
             tasks = {}
             if gh_plan["applicable"] and config.HAS_GITHUB:
                 tasks["github"] = asyncio.create_task(GitHubConnector().collect(gh_plan, progress))
-            if x_plan["applicable"] and config.HAS_X:
+            if x_plan["applicable"] and config.HAS_X and not x_gated:
+                x_plan["category"] = analysis.get("category", "technical")   # 决定 X 噪音判定
                 tasks["x"] = asyncio.create_task(XConnector().collect(x_plan, progress))
 
             collected: Dict[str, Any] = {}
@@ -131,7 +154,8 @@ async def run_pipeline(problem: str, china_first: bool = False) -> AsyncIterator
             async def review_and_score(ch: str, cands: List[Dict[str, Any]]):
                 if not cands:
                     return []
-                reviews = await llm.review_candidates(problem, subproblems, ch, cands)
+                reviews = await llm.review_candidates(problem, subproblems, ch, cands,
+                                                      category=analysis.get("category", "technical"))
                 if not reviews:
                     trace.event("review_empty", channel=ch)   # 复核全失败 → 走启发式
                 for c in cands:
@@ -148,6 +172,12 @@ async def run_pipeline(problem: str, china_first: bool = False) -> AsyncIterator
                         c["why_relevant"] = _fallback_why(c)
                     c["hireability"] = scoring.hireability(c)
                     c["china_fit"] = scoring.china_fit(c, llm_cn_lang=rv.get("cn_lang"))
+                # X 定位"前沿声音"：相关性低于阈值的直接丢，质量优先（仅在有 LLM 复核结果时启用）
+                if ch == "x" and reviews:
+                    before = len(cands)
+                    cands = [c for c in cands if c.get("raw_relevance", 0.0) >= config.X_RELEVANCE_FLOOR]
+                    if before != len(cands):
+                        trace.event("x_relevance_floor", kept=len(cands), dropped=before - len(cands))
                 scoring.apply_weight(cands, channels[ch]["weight"])
                 boost = config.CHINA_FIT_BOOST if china_first else 0.0   # "中国优先"开关
                 for c in cands:
@@ -182,7 +212,10 @@ async def run_pipeline(problem: str, china_first: bool = False) -> AsyncIterator
                 plan = channels[ch]
                 rep = dict(collected.get(ch, ([], {}))[1]) if ch in collected else {}
                 note = ""
-                if not plan["applicable"]:
+                if ch == "x" and x_gated:
+                    note = ("本次为中文/中国导向难题：目标人才基本不在 X（技术在 GitHub、"
+                            "营销/品牌在小红书/微博），已跳过 X 以省成本。X 更适合全球/英文问题。")
+                elif not plan["applicable"]:
                     note = plan.get("reason", "该通道不适用，已跳过。")
                 elif not config.HAS_GITHUB and ch == "github":
                     note = "未配置 GITHUB_TOKEN，跳过。"

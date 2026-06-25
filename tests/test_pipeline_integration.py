@@ -40,7 +40,7 @@ def _patch(monkeypatch, analysis, gh_cands, x_cands):
     async def fake_analyze(problem):
         return analysis
 
-    async def fake_review(problem, subs, channel, cands):
+    async def fake_review(problem, subs, channel, cands, category="technical"):
         return {c["id"]: {"relevance": 0.9, "why_relevant": f"why {c['id']}"} for c in cands}
 
     monkeypatch.setattr(pipeline.llm, "analyze_problem", fake_analyze)
@@ -139,7 +139,7 @@ async def test_llm_failure_falls_back_to_heuristic(monkeypatch):
     async def boom(problem):
         raise RuntimeError("kimi down")
 
-    async def empty_review(p, s, ch, cands):
+    async def empty_review(p, s, ch, cands, category="technical"):
         return {}
 
     monkeypatch.setattr(pipeline.llm, "analyze_problem", boom)

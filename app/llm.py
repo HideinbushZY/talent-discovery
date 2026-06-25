@@ -131,7 +131,7 @@ _ANALYZE_SYSTEM = """你是"从问题出发的人才发现"系统的难题理解
    - GitHub 找"动手实现/构建过这类问题的人"。对纯品牌/创意营销、纯管理/经营类难题，GitHub 通常没有对应人才信号 → applicable=false、weight=0，并在 reason 里诚实说明。
    - X 找"在这类问题上最前沿、最有话语权的人"。绝大多数难题 X 都 applicable。
 3) 权重 weight 只在 applicable 的通道间分配并归一化（两个都适用就分配如 0.6/0.4；只剩一个就 1.0；不适用的为 0）。
-4) 为 applicable 的通道给出可检索信号：GitHub 给真实存在的 seed_repos（owner/repo）、code_search_queries、relevant_paths_hint；X 给 keywords（英文为主）、phrases。
+4) 为 applicable 的通道给出可检索信号：GitHub 给真实存在的 seed_repos（owner/repo）、code_search_queries、relevant_paths_hint；X 给 keywords（英文为主，领域限定词）、phrases（1-3 个**最能精确锁定该领域**的短语，用于精确匹配——X 是找该领域**有话语权的人**，词要能筛掉泛泛蹭热点的噪音）。
 5) **known_people（关键）**：如果你**确知**该难题领域有公认的开源作者/maintainer/技术负责人，在 GitHub 的 known_people 里**直接点名**：
    - name（中文或英文人名）、handle（其 GitHub 用户名，**只有你有把握是真实的才填**）、why（一句他为何是该领域关键人，引用其代表项目）。
    - 尽量给该领域**最有代表性的真实的人**（论文一作、知名 repo 作者、行业 lead）；**宁缺毋滥，绝不编造 handle**。不确定 handle 就别写这条，把其代表项目放进 seed_repos。
@@ -241,6 +241,7 @@ async def review_candidates(
     subproblems: List[str],
     channel: str,
     candidates: List[Dict[str, Any]],
+    category: str = "technical",
 ) -> Dict[str, Dict[str, Any]]:
     """返回 {id: {relevance, why_relevant}}。分小批并行复核，失败批跳过（走启发式兜底）。"""
     if not candidates:
@@ -250,7 +251,7 @@ async def review_candidates(
 
     async def run(batch):
         async with sem:
-            return await _review_batch(problem, subproblems, channel, batch)
+            return await _review_batch(problem, subproblems, channel, batch, category)
 
     out: Dict[str, Dict[str, Any]] = {}
     for r in await asyncio.gather(*(run(b) for b in batches)):
@@ -258,7 +259,7 @@ async def review_candidates(
     return out
 
 
-async def _review_batch(problem, subproblems, channel, candidates) -> Dict[str, Dict[str, Any]]:
+async def _review_batch(problem, subproblems, channel, candidates, category="technical") -> Dict[str, Dict[str, Any]]:
     lines = []
     for c in candidates:
         ev = "; ".join(
@@ -272,6 +273,24 @@ async def _review_batch(problem, subproblems, channel, candidates) -> Dict[str, 
              "evidence": ev[:600], "self_text": self_text[:400]},
             ensure_ascii=False,
         ))
+    # X 渠道定位"前沿声音/有话语权的人"，相关性判定从严。**"什么算相关"取决于难题类别**：
+    #   技术类 → 要研究/工程/创业实战的人，营销/带货号是噪音；
+    #   营销类 → 要营销/增长/品牌/内容实战的人，那些恰恰是目标。
+    if channel != "x":
+        x_extra = ""
+    elif category == "marketing":
+        x_extra = ("\n【X 渠道·营销难题判定】这里要的是**有真实营销/增长/品牌/内容实战与话语权的人**"
+                   "（操盘手、品牌/增长负责人、有真实案例或真实受众的创作者）。**主要看 bio 是谁、在做什么**："
+                   "bio 能看出营销/增长/品牌/内容一线实战或有真实受众 → 0.6 以上；"
+                   "纯 bot/资讯搬运/空投诈骗/与营销无关/只是蹭词 → 0.2 以下。"
+                   "注意：营销人公开发观点/做内容**本身就是其专业体现**，别因为他在'做营销'而扣分。")
+    else:
+        x_extra = ("\n【X 渠道·技术难题判定从严】这里要的是该领域**有真实话语权或在一线做事的声音**"
+                   "（研究者/创业者/资深从业者，有自己的观点、作品或一线经验）。"
+                   "**判定主要看 bio（此人是谁、在做什么），帖子内容只是佐证、不能单独定调**："
+                   "bio 是营销/带货/SEO/赚钱/泛 growth/币圈/纯内容创作者/新闻搬运 → **即使帖子提到了话题**，"
+                   "relevance 也给 0.2 以下；只有 bio 能看出此人确实在该领域做研究/创业/工程，才给 0.6 以上。"
+                   "记住：在 X 上**提到**一个话题≠是这个领域的人。")
     system = (
         "你在为'从问题出发的人才发现'做相关性复核。给定企业难题和一批来自"
         f"{channel} 的候选人（含其证据），对每人做三件事：\n"
@@ -279,15 +298,17 @@ async def _review_batch(problem, subproblems, channel, candidates) -> Dict[str, 
         "2) why_relevant：一句中文，引用其具体证据。\n"
         "3) cn_lang：其**中文工作能力**（0-1）——只依据 self_text（候选人**自己写**的文字："
         "简介/提交信息/帖子原文）：全是流利中文≈1，夹杂中文/能读写≈0.5，看不出中文能力≈0。"
-        "注意：只看 self_text，**不要**被 evidence 里系统生成的中文描述（如「X 的贡献者」）误导。\n"
+        "注意：只看 self_text，**不要**被 evidence 里系统生成的中文描述（如「X 的贡献者」）误导。"
+        + x_extra + "\n"
         '只输出 JSON：{"reviews":[{"id":"原样id","relevance":数字,"why_relevant":"一句中文","cn_lang":数字}]}，每人一条。'
     )
     user = (f"难题：{problem}\n子问题：{', '.join(subproblems)}\n\n候选人（每行一个 JSON）：\n"
             + "\n".join(lines))
     try:
-        # 复核走更快的非思考模型（config.LLM_REVIEW_PROVIDERS），失败回退到主供应商
-        data = await _chat_json(system, user, max_tokens=6000,
-                                providers=config.LLM_REVIEW_PROVIDERS)
+        # GitHub 有硬证据，快模型够用；X 要分辨"领域权威 vs AI内容/新闻/币圈号"很微妙，
+        # 用更强的主模型(kimi-k2.6)判定，明显更准。失败都会回退到下一个供应商。
+        providers = config.LLM_PROVIDERS if channel == "x" else config.LLM_REVIEW_PROVIDERS
+        data = await _chat_json(system, user, max_tokens=6000, providers=providers)
     except Exception:
         return {}
     out: Dict[str, Dict[str, Any]] = {}
