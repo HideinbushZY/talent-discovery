@@ -40,9 +40,11 @@ def new_candidate(source: str, key: str) -> Dict[str, Any]:
         # 采集阶段填入的原始信号（评分用，不直接展示）
         "_signals": {
             "relevance_hits": 0.0,   # 匹配强度累积（path/code 命中更高）
-            "depth": 0.0,            # 相关贡献/影响计数
+            "depth": 0.0,            # 相关贡献/影响计数（commit 数）
+            "influence": 0.0,        # 影响力代理（被 AI 提名的关键人用 followers）
             "recency_ts": None,      # 最近相关活动的 epoch 秒
             "matched_paths": False,  # 是否命中相关模块/路径
+            "nominated": False,      # 是否被 AI 直接点名（领域关键人）
         },
     }
 

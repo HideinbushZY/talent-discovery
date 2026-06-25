@@ -97,7 +97,7 @@ class GitHubConnector(Connector):
                 cands[key] = new_candidate("github", login)
             return cands[key]
 
-        seed_repos = [r for r in plan.get("seed_repos", []) if _REPO_RE.match(r or "")][:6]
+        seed_repos = [r for r in plan.get("seed_repos", []) if _REPO_RE.match(r or "")][:12]
         path_hints = plan.get("relevant_paths_hint", [])[:3]
         queries = plan.get("code_search_queries", [])[:3]
 
@@ -199,9 +199,47 @@ class GitHubConnector(Connector):
                         add_evidence(c, "code", f"活跃于代码搜索命中的仓库 {full}",
                                      url=f"https://github.com/{full}")
 
-            # C. 取 Top N 充实 profile（bio/followers/location/org）
+            # B2. AI 提名的领域关键人 —— 逐个用 GitHub API 核实并并入
+            # （把"发现"从'种子仓库 top 贡献者'扩展到'LLM 的知识'；编造的 handle 会被核实丢弃）
+            known = [p for p in plan.get("known_people", []) if isinstance(p, dict)][:8]
+            if known:
+                await progress("github", f"核实 AI 提名的 {len(known)} 位领域关键人…")
+
+                async def verify(p):
+                    handle = (p.get("handle") or "").strip().lstrip("@")
+                    if not handle or not re.match(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$", handle):
+                        return None
+                    u = await self._enrich_user(client, handle)
+                    if not u or not u.get("login") or u.get("type") != "User":
+                        return None
+                    return p, u
+
+                for res in await gather_limited(known, verify, concurrency=5):
+                    if not res:
+                        continue
+                    p, u = res
+                    c = cand_for(u["login"])
+                    c["name"] = u.get("name") or p.get("name") or u["login"]
+                    c["avatar_url"] = c["avatar_url"] or u.get("avatar_url")
+                    c["profile_url"] = c["profile_url"] or u.get("html_url")
+                    c["bio"] = c.get("bio") or u.get("bio")
+                    c["location"] = c.get("location") or u.get("location")
+                    c["org"] = c.get("org") or u.get("company")
+                    c["followers"] = max(c.get("followers", 0), u.get("followers", 0) or 0)
+                    c["_self_text"] = (c.get("_self_text", "") + " " + (u.get("bio") or ""))[:600]
+                    c["_signals"]["nominated"] = True
+                    c["_signals"]["relevance_hits"] += 4.0                       # 领域点名=强相关
+                    c["_signals"]["influence"] = max(c["_signals"].get("influence", 0), u.get("followers", 0) or 0)
+                    if not c.get("contact_hint"):
+                        c["contact_hint"] = u.get("email") or u.get("blog") or None
+                    add_evidence(c, "profile", f"领域关键人物（AI 提名）：{(p.get('why') or '')[:60]}",
+                                 url=u.get("html_url"),
+                                 metric=f"{u.get('followers',0)} followers · {u.get('public_repos',0)} repos")
+
+            # C. 取 Top N 充实 profile（被点名的关键人优先入选）
             ranked = sorted(cands.values(),
-                            key=lambda c: (c["_signals"]["matched_paths"],
+                            key=lambda c: (c["_signals"].get("nominated", False),
+                                           c["_signals"]["matched_paths"],
                                            c["_signals"]["relevance_hits"],
                                            c["_signals"]["depth"]),
                             reverse=True)[: config.TOP_N_PER_CHANNEL]

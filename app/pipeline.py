@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, AsyncIterator, Dict, List
 
-from . import config, llm, scoring
+from . import config, llm, scoring, websearch
 from . import observability as obs
 from .connectors.github import GitHubConnector
 from .connectors.x import XConnector
@@ -45,6 +45,39 @@ async def run_pipeline(problem: str, china_first: bool = False) -> AsyncIterator
             channels = analysis["channels"]
             gh_plan = channels["github"]
             x_plan = channels["x"]
+
+            # ── 阶段 1.5：联网发现相关仓库（补 LLM 不知道的，尤其中国本土栈）──
+            # 把搜索引擎找到的 GitHub 仓库并入 seed_repos → 现有连接器拉其作者/贡献者。
+            if gh_plan["applicable"] and config.HAS_GITHUB and config.WEB_SEARCH:
+                # 查询来源（不依赖 Kimi 是否填 web_queries——降级模型常漏填）：
+                #  1) Kimi 给的 web_queries（最好）
+                #  2) 短检索词 code_search_queries（关键词式，召回更准、更易命中头部仓库）
+                #  3) 子问题兜底（中文，利于召回中国本土仓库）
+                wq = [q for q in (gh_plan.get("web_queries") or []) if q]
+                for q in (gh_plan.get("code_search_queries") or [])[:2]:
+                    cand = f"{q} 开源 框架 github"
+                    if cand not in wq:
+                        wq.append(cand)
+                for s in (analysis.get("subproblems") or [])[:1]:
+                    cand = f"{s} 开源 github"
+                    if cand not in wq:
+                        wq.append(cand)
+                wq = wq[:4]
+                if wq:
+                    await queue.put(_event(type="status", stage=1,
+                                           message="阶段1.5：联网发现相关开源仓库…"))
+                    try:
+                        extra = await websearch.discover(wq)
+                    except Exception as e:  # noqa: BLE001
+                        extra = []
+                        trace.event("web_discover_failed", error=str(e)[:120])
+                    seen = set(gh_plan.get("seed_repos", []))
+                    new_repos = [r for r in extra if r not in seen]
+                    if new_repos:
+                        gh_plan["seed_repos"] = list(gh_plan.get("seed_repos", [])) + new_repos
+                        gh_plan["web_discovered"] = new_repos     # 标记来源，便于展示/排查
+                        await progress("github", f"联网发现 {len(new_repos)} 个相关仓库，并入采集")
+                    trace.event("web_discovered", n=len(new_repos), degraded=False)
 
             # ── 阶段 2：双渠道并行采集（只跑 applicable）────────
             trace.start("collect")

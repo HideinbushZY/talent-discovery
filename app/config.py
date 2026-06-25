@@ -83,6 +83,11 @@ def _review_providers() -> list:
 LLM_REVIEW_PROVIDERS = _review_providers()
 
 # ── 成本 / 范围控制 ───────────────────────────────────────────
+# 联网发现：搜索引擎找相关 GitHub 仓库（补 LLM 不知道的，尤其中国本土栈）。
+# 默认开；有 TAVILY_API_KEY 用 Tavily（召回更高），否则用免 key 的 DuckDuckGo(ddgs)。
+WEB_SEARCH = (os.getenv("WEB_SEARCH", "1").strip().lower() not in ("0", "false", "no", ""))
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "").strip()
+
 # 中国契合度对总榜排名的加成系数（给中国公司用：把中国契合的人在默认总榜里往上顶）。
 # rank_score = 加权分 + CHINA_FIT_BOOST × china_fit分(0-1)。设 0 关闭；相关性仍是主导。
 CHINA_FIT_BOOST = _float("CHINA_FIT_BOOST", 30.0)
@@ -115,4 +120,7 @@ def summary() -> dict:
         "llm_review_model": LLM_REVIEW_MODEL,
         "x_read_budget": X_READ_BUDGET,
         "top_n_per_channel": TOP_N_PER_CHANNEL,
+        "web_search": ("off" if not WEB_SEARCH
+                       else f"on/tavily ({mask(TAVILY_API_KEY)})" if TAVILY_API_KEY
+                       else "on/ddgs(免key,生产建议配 TAVILY_API_KEY)"),
     }

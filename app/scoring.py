@@ -22,7 +22,7 @@ _HIRE_BIGORG = ["google", "meta", "facebook", "openai", "anthropic", "microsoft"
 # 中国契合度（China-fit）——给中国公司用：衡量"能否直接为我所用"。
 # 全部是**岗位相关的客观信号**（中文能力 / 地理时区 / 中国市场经验），非族裔推断。
 _HAN_RE = re.compile(r"[一-鿿]")   # 中日韩统一表意文字（中文）
-_CN_LOCATIONS = ["china", "中国", "中华人民共和国", "prc", "beijing", "北京", "shanghai", "上海",
+_CN_LOCATIONS = ["china", "中国", "中华人民共和国", "prc", "beijing", "peking", "北京", "shanghai", "上海",
                  "shenzhen", "深圳", "hangzhou", "杭州", "guangzhou", "广州", "chengdu", "成都",
                  "nanjing", "南京", "wuhan", "武汉", "xi'an", "西安", "suzhou", "苏州",
                  "tianjin", "天津", "chongqing", "重庆", "changsha", "长沙", "hefei", "合肥"]
@@ -59,7 +59,8 @@ def score_github(cand: Dict[str, Any], llm_relevance: float | None) -> None:
     else:
         base = _log_norm(sig["relevance_hits"], 8)
         relevance = min(1.0, base + (0.2 if sig["matched_paths"] else 0.0))
-    depth = _log_norm(sig["depth"], 400)            # 相关 commit/贡献计数
+    # 贡献深度（commit）或影响力（被点名关键人的 followers），取较高者
+    depth = max(_log_norm(sig["depth"], 400), _log_norm(sig.get("influence", 0), 2000))
     recency = _recency_score(sig["recency_ts"])
 
     score = 100 * (0.50 * relevance + 0.35 * depth + 0.15 * recency)
@@ -68,7 +69,7 @@ def score_github(cand: Dict[str, Any], llm_relevance: float | None) -> None:
                          "depth_or_influence": round(depth, 3),
                          "recency": round(recency, 3)}
     cand["problem_fit_score"] = round(score, 1)
-    # 证据强度：代码贡献等可核验产出为 hard
+    # 证据强度：真实代码贡献=hard；仅 AI 提名+主页(无确认代码)=medium
     cand["evidence_strength"] = "hard" if (sig["matched_paths"] or sig["depth"] >= 5) else "medium"
 
 

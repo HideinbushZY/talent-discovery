@@ -132,6 +132,11 @@ _ANALYZE_SYSTEM = """你是"从问题出发的人才发现"系统的难题理解
    - X 找"在这类问题上最前沿、最有话语权的人"。绝大多数难题 X 都 applicable。
 3) 权重 weight 只在 applicable 的通道间分配并归一化（两个都适用就分配如 0.6/0.4；只剩一个就 1.0；不适用的为 0）。
 4) 为 applicable 的通道给出可检索信号：GitHub 给真实存在的 seed_repos（owner/repo）、code_search_queries、relevant_paths_hint；X 给 keywords（英文为主）、phrases。
+5) **known_people（关键）**：如果你**确知**该难题领域有公认的开源作者/maintainer/技术负责人，在 GitHub 的 known_people 里**直接点名**：
+   - name（中文或英文人名）、handle（其 GitHub 用户名，**只有你有把握是真实的才填**）、why（一句他为何是该领域关键人，引用其代表项目）。
+   - 尽量给该领域**最有代表性的真实的人**（论文一作、知名 repo 作者、行业 lead）；**宁缺毋滥，绝不编造 handle**。不确定 handle 就别写这条，把其代表项目放进 seed_repos。
+   - 系统会逐个用 GitHub API 核实你给的 handle，编的会被丢弃，但点名能让系统发现"光靠仓库 top 贡献者捞不到的关键人"。
+6) **web_queries（关键）**：给 2-3 条**搜索引擎查询**（像在 Google/百度里找"这个领域有哪些开源项目/谁在做的"）。**优先用中文**（很多中国本土开源栈只在中文资料里出现）。系统会联网搜索这些 query、抽出相关 GitHub 仓库——这能补上你不知道的项目（尤其中国本土的）。例：「端侧 语音识别 唤醒词 开源 框架」「中文 大模型 Agent 工具调用 github」。
 诚实优先：难题该塌回单通道就塌回，不要硬凑。
 
 只输出一个 JSON 对象，结构严格如下（不要任何多余文字）：
@@ -145,7 +150,10 @@ _ANALYZE_SYSTEM = """你是"从问题出发的人才发现"系统的难题理解
     "weight": 0.6,
     "seed_repos": ["owner/repo", "owner/repo"],
     "code_search_queries": ["query1", "query2"],
-    "relevant_paths_hint": ["path/hint"]
+    "relevant_paths_hint": ["path/hint"],
+    "known_people": [
+      {"name": "人名", "handle": "github用户名", "why": "一句：他为何是该领域关键人，代表项目"}
+    ]
   },
   "x": {
     "applicable": true,
@@ -187,6 +195,8 @@ def _normalize_analysis(d: Dict[str, Any]) -> Dict[str, Any]:
             "seed_repos": list(raw.get("seed_repos", []) or []),
             "code_search_queries": list(raw.get("code_search_queries", []) or []),
             "relevant_paths_hint": list(raw.get("relevant_paths_hint", []) or []),
+            "known_people": [p for p in (raw.get("known_people", []) or []) if isinstance(p, dict)][:10],
+            "web_queries": [str(q) for q in (raw.get("web_queries", []) or []) if q][:4],
             "keywords": list(raw.get("keywords", []) or []),
             "phrases": list(raw.get("phrases", []) or []),
         }

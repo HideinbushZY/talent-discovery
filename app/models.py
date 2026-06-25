@@ -71,6 +71,8 @@ class ChannelPlan(BaseModel):
     seed_repos: List[str] = Field(default_factory=list)
     code_search_queries: List[str] = Field(default_factory=list)
     relevant_paths_hint: List[str] = Field(default_factory=list)
+    known_people: List[Dict[str, Any]] = Field(default_factory=list)   # AI 提名的领域关键人
+    web_queries: List[str] = Field(default_factory=list)               # 联网发现用的搜索查询
     # x 专用
     keywords: List[str] = Field(default_factory=list)
     phrases: List[str] = Field(default_factory=list)
