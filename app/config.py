@@ -18,6 +18,13 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
 # ── 访问控制 ──────────────────────────────────────────────────
 # 设置后，所有页面/接口需 HTTP Basic Auth（用户名任意，密码=此值）。
 # 公网部署必须设置；留空=本地开放（仅供本机开发）。
@@ -76,6 +83,10 @@ def _review_providers() -> list:
 LLM_REVIEW_PROVIDERS = _review_providers()
 
 # ── 成本 / 范围控制 ───────────────────────────────────────────
+# 中国契合度对总榜排名的加成系数（给中国公司用：把中国契合的人在默认总榜里往上顶）。
+# rank_score = 加权分 + CHINA_FIT_BOOST × china_fit分(0-1)。设 0 关闭；相关性仍是主导。
+CHINA_FIT_BOOST = _float("CHINA_FIT_BOOST", 30.0)
+
 X_READ_BUDGET = _int("X_READ_BUDGET", 300)        # 每次搜索 X 帖子读取上限
 X_SESSION_READ_CAP = _int("X_SESSION_READ_CAP", 3000)  # 进程级 X 读取总上限（防失控，~$15）
 TOP_N_PER_CHANNEL = _int("TOP_N_PER_CHANNEL", 40)  # 每通道进入评分的候选数

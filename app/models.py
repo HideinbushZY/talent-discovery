@@ -50,6 +50,7 @@ class Candidate(BaseModel):
 
     problem_fit_score: float = 0.0
     weighted_score: float = 0.0          # 跨渠道排序用（problem_fit_score × 通道权重因子）
+    rank_score: float = 0.0              # 总榜实际排序分 = 加权分 + 中国契合加成
     subscores: Subscores = Field(default_factory=Subscores)
     evidence_strength: EvidenceStrength = "soft"
     why_relevant: str = ""

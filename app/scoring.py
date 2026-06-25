@@ -176,6 +176,17 @@ def china_fit(cand: Dict[str, Any], llm_cn_lang: float | None = None) -> Dict[st
     return {"level": level, "score": score, "reasons": reasons}
 
 
+def rank_score(cand: Dict[str, Any], china_boost: float) -> float:
+    """总榜排序分 = 跨渠道加权分 + 中国契合加成。
+
+    相关性/加权分仍是主导，china_fit 只做"往上顶"——给中国公司用时把本地能上手的人提前，
+    但不会把跟难题不沾边的人顶到前面（大的契合度差距盖不过去）。
+    """
+    base = cand.get("weighted_score", cand.get("problem_fit_score", 0.0))
+    cf = (cand.get("china_fit") or {}).get("score", 0.0) or 0.0
+    return round(base + china_boost * cf, 1)
+
+
 def apply_weight(cands: List[Dict[str, Any]], weight: float) -> None:
     """按通道权重对该通道候选的最终分做轻度加权（仅用于跨渠道排序）。
 

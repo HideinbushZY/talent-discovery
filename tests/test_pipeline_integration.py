@@ -79,6 +79,29 @@ async def test_dual_channel_ranked_and_scored(monkeypatch):
     assert reps["github"]["collected"] == 3
 
 
+async def test_china_first_toggle_reorders(monkeypatch):
+    def mk(login, bio, depth):
+        c = new_candidate("github", login)
+        c["name"] = login
+        c["bio"] = bio
+        c["_signals"].update(relevance_hits=3.0, depth=depth, matched_paths=True, recency_ts=None)
+        add_evidence(c, "repo", "贡献者", url=f"https://github.com/{login}", metric="x")
+        return c
+
+    cn = mk("china_dev", "分布式向量检索工程师", 50)     # 中文 bio → 中国契合；problem_fit 较低
+    en = mk("intl_dev", "vector db engineer", 400)      # 英文 bio → 非中国；problem_fit 较高
+    _patch(monkeypatch, _DUAL, [cn, en], [])
+
+    off = await pipeline.run_to_result("RAG", china_first=False)
+    ids = [c["id"] for c in off["candidates"]]
+    assert ids.index("github:intl_dev") < ids.index("github:china_dev")   # 关：英文的靠前
+
+    on = await pipeline.run_to_result("RAG", china_first=True)
+    ids = [c["id"] for c in on["candidates"]]
+    assert ids.index("github:china_dev") < ids.index("github:intl_dev")   # 开：中文的被顶到前
+    assert on["meta"]["china_first"] is True
+
+
 async def test_github_honestly_skipped(monkeypatch):
     analysis = {
         "domain": "品牌", "category": "marketing", "maturity": "well_supported", "subproblems": ["a"],

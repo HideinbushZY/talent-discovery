@@ -17,7 +17,7 @@ def _event(**kw) -> Dict[str, Any]:
     return kw
 
 
-async def run_pipeline(problem: str) -> AsyncIterator[Dict[str, Any]]:
+async def run_pipeline(problem: str, china_first: bool = False) -> AsyncIterator[Dict[str, Any]]:
     queue: asyncio.Queue = asyncio.Queue()
 
     async def progress(channel: str, message: str):
@@ -102,6 +102,9 @@ async def run_pipeline(problem: str) -> AsyncIterator[Dict[str, Any]]:
                     c["hireability"] = scoring.hireability(c)
                     c["china_fit"] = scoring.china_fit(c, llm_cn_lang=rv.get("cn_lang"))
                 scoring.apply_weight(cands, channels[ch]["weight"])
+                boost = config.CHINA_FIT_BOOST if china_first else 0.0   # "中国优先"开关
+                for c in cands:
+                    c["rank_score"] = scoring.rank_score(c, boost)
                 return cands
 
             # 两通道的 Claude 复核 + 评分并行跑
@@ -113,7 +116,8 @@ async def run_pipeline(problem: str) -> AsyncIterator[Dict[str, Any]]:
             trace.end("review_score")
 
             # ── 阶段 4：融合总榜 ──────────────────────────────
-            all_cands.sort(key=lambda c: c.get("weighted_score", c["problem_fit_score"]), reverse=True)
+            # 按 rank_score 排（=加权分 + 中国优先加成；开关关时加成为 0，等价于加权分）
+            all_cands.sort(key=lambda c: c.get("rank_score") or c.get("weighted_score", c["problem_fit_score"]), reverse=True)
             top = all_cands[:30]
 
             # 通道报告
@@ -166,6 +170,7 @@ async def run_pipeline(problem: str) -> AsyncIterator[Dict[str, Any]]:
                     "model": model,
                     "x_reads_used": x_reads,
                     "total_candidates": len(all_cands),
+                    "china_first": china_first,
                     "plan": {"github": gh_plan, "x": x_plan},
                     **trace.meta(),     # request_id, stages_sec, degradations
                 },
@@ -199,10 +204,10 @@ def _fallback_why(c: Dict[str, Any]) -> str:
     return "与该难题主题相关（信号较弱）。"
 
 
-async def run_to_result(problem: str) -> Dict[str, Any]:
+async def run_to_result(problem: str, china_first: bool = False) -> Dict[str, Any]:
     """非流式：跑完返回最终结果 dict（给 POST / 测试用）。"""
     final = None
-    async for ev in run_pipeline(problem):
+    async for ev in run_pipeline(problem, china_first):
         if ev["type"] == "done":
             final = ev["result"]
         elif ev["type"] == "error":

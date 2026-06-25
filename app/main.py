@@ -51,6 +51,7 @@ app = FastAPI(title="从问题出发的人才发现", version="2.0",
 
 class SearchBody(BaseModel):
     problem: str
+    china_first: bool = False    # "中国优先"开关：把中国契合的人在总榜里顶到最前
 
 
 class FeedbackBody(BaseModel):
@@ -87,7 +88,7 @@ async def create_search(body: SearchBody):
     """建一个后台搜索作业，立即返回 job_id（不阻塞）。"""
     if not (body.problem or "").strip():
         return JSONResponse({"error": "problem 不能为空"}, status_code=400)
-    job_id = jobs.create(body.problem.strip())
+    job_id = jobs.create(body.problem.strip(), body.china_first)
     return {"job_id": job_id}
 
 

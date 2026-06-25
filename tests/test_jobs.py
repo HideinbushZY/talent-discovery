@@ -20,7 +20,7 @@ async def test_job_runs_detached_and_persists(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "DB_PATH", tmp_path / "t.db")
     monkeypatch.setattr(store, "_conn", None)
 
-    async def fake_pipeline(problem):
+    async def fake_pipeline(problem, china_first=False):
         yield {"type": "status", "stage": 1, "message": "分型中"}
         yield {"type": "analysis", "data": {"domain": "X"}}
         yield {"type": "done", "result": {"problem": problem, "candidates": [], "meta": {"request_id": "r1"}}}
@@ -45,7 +45,7 @@ async def test_job_error_is_captured(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "DB_PATH", tmp_path / "e.db")
     monkeypatch.setattr(store, "_conn", None)
 
-    async def boom_pipeline(problem):
+    async def boom_pipeline(problem, china_first=False):
         yield {"type": "status", "stage": 1, "message": "开始"}
         raise RuntimeError("pipeline 炸了")
 

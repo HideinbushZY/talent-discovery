@@ -21,9 +21,10 @@ _MAX_JOBS = 200   # 内存里最多保留多少个作业（旧的淘汰，已落
 
 
 class Job:
-    def __init__(self, job_id: str, problem: str):
+    def __init__(self, job_id: str, problem: str, china_first: bool = False):
         self.id = job_id
         self.problem = problem
+        self.china_first = china_first
         self.status = "running"            # running | done | error
         self.events: List[Dict[str, Any]] = []
         self.result: Optional[Dict[str, Any]] = None
@@ -35,19 +36,19 @@ class JobManager:
     def __init__(self):
         self._jobs: "OrderedDict[str, Job]" = OrderedDict()
 
-    def create(self, problem: str) -> str:
+    def create(self, problem: str, china_first: bool = False) -> str:
         from .pipeline import run_pipeline   # 延迟导入避免循环依赖
         job_id = secrets.token_hex(6)
-        job = Job(job_id, problem)
+        job = Job(job_id, problem, china_first)
         self._jobs[job_id] = job
         self._evict()
         asyncio.create_task(self._run(job, run_pipeline))
-        obs.log(_log, logging.INFO, "job.create", job_id=job_id, problem=problem[:80])
+        obs.log(_log, logging.INFO, "job.create", job_id=job_id, problem=problem[:80], china_first=china_first)
         return job_id
 
     async def _run(self, job: Job, run_pipeline) -> None:
         try:
-            async for ev in run_pipeline(job.problem):
+            async for ev in run_pipeline(job.problem, job.china_first):
                 job.events.append(ev)
                 if ev.get("type") == "done":
                     job.result = ev["result"]

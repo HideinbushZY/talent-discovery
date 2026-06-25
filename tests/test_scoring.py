@@ -111,6 +111,15 @@ def test_china_fit_llm_overrides_regex():
     assert r["score"] == 0.0
 
 
+def test_rank_score_china_boost():
+    a = {"weighted_score": 77.0, "china_fit": {"score": 0.45}}   # 契合稍低但中国契合
+    b = {"weighted_score": 89.0, "china_fit": {"score": 0.0}}    # 契合更高但非中国
+    assert scoring.rank_score(a, 0) == 77.0          # 关：原样
+    assert scoring.rank_score(b, 0) == 89.0
+    assert scoring.rank_score(a, 30) == 90.5         # 开：77 + 30×0.45 = 90.5
+    assert scoring.rank_score(a, 30) > scoring.rank_score(b, 30)   # 中国契合的被顶到前
+
+
 def test_apply_weight_factor(make_gh_cand):
     c = make_gh_cand()
     c["problem_fit_score"] = 80.0
