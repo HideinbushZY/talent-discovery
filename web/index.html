@@ -77,6 +77,9 @@
         <span id="exp-text"></span>
       </div>
 
+      <!-- Result summary (grounded 导读) -->
+      <div id="summary" class="hidden bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 fade-in"></div>
+
       <!-- Channel reports -->
       <div id="channels" class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4"></div>
 
@@ -250,6 +253,7 @@ function finish(result){
   state.result = result;
   state.candidates = result.candidates || [];
   renderAnalysis(result);
+  renderSummary(result);
   renderChannels(result);
   renderPlan(result);
   $('#exp-banner').classList.toggle('hidden', result.maturity !== 'experimental');
@@ -277,6 +281,39 @@ async function submitSession(){
         comment: $('#session-comment').value, problem: (state.result&&state.result.problem)||''})});
     $('#session-thanks').classList.remove('hidden');
   } catch(_){}
+}
+
+function renderSummary(r){
+  const s = r.summary, box = $('#summary');
+  if(!s || (!s.overview && !(s.recommended_first||[]).length)){ box.classList.add('hidden'); return; }
+  const byh = {}; (state.candidates||[]).forEach(c => { if(c.handle) byh[c.handle] = c; });
+  const link = (h, nm) => {
+    const c = byh[h], label = esc(nm || (c&&c.name) || h);
+    return (c && c.profile_url)
+      ? `<a href="${esc(c.profile_url)}" target="_blank" class="text-indigo-600 hover:underline font-medium">${label}</a>`
+      : `<span class="font-medium text-slate-700">${label}</span>`;
+  };
+  let html = `<div class="flex items-center gap-2 mb-2">
+      <span class="text-xs font-semibold text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">导读</span>
+      <span class="text-xs text-slate-400">AI 基于已核验候选生成，仅供决策参考</span></div>`;
+  if(s.overview) html += `<p class="text-sm text-slate-700 leading-relaxed mb-3">${esc(s.overview)}</p>`;
+  if((s.recommended_first||[]).length){
+    html += `<div class="mb-3"><div class="text-xs font-medium text-slate-500 mb-1">建议先接触</div><ul class="space-y-1">`;
+    s.recommended_first.forEach(x => {
+      html += `<li class="text-sm text-slate-700">→ ${link(x.handle, x.name)} <span class="text-slate-500">— ${esc(x.reason||'')}</span></li>`;
+    });
+    html += `</ul></div>`;
+  }
+  if((s.groups||[]).length){
+    html += `<div><div class="text-xs font-medium text-slate-500 mb-1">人才分布</div><div class="space-y-1.5">`;
+    s.groups.forEach(g => {
+      const members = (g.handles||[]).map(h => link(h)).join('、');
+      html += `<div class="text-sm"><span class="inline-block text-xs bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 mr-1 align-middle">${esc(g.label)}</span><span class="text-slate-600">${members}</span></div>`;
+    });
+    html += `</div></div>`;
+  }
+  box.innerHTML = html;
+  box.classList.remove('hidden');
 }
 
 function renderAnalysis(r){

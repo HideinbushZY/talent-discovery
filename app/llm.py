@@ -305,6 +305,75 @@ async def _review_batch(problem, subproblems, channel, candidates) -> Dict[str, 
 
 
 # ─────────────────────────────────────────────────────────────
+# 结果导读（轻量摘要）——给招人方做决策用，严格只用已采集候选、不发挥
+# ─────────────────────────────────────────────────────────────
+async def summarize_results(problem: str, subproblems: List[str],
+                            candidates: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """生成 grounded 导读：landscape + 建议先接触谁 + 分组。
+
+    只基于传入的候选（已筛选+核验）；提到的人必须用名单里的 handle。
+    代码侧再校验一遍 handle 真实存在，过滤掉模型可能编出来的人。失败返回 None（优雅降级）。
+    """
+    cands = [c for c in candidates if c.get("handle")][:15]
+    if not cands:
+        return None
+    by_handle = {c["handle"]: c for c in cands}
+    items = []
+    for c in cands:
+        items.append({
+            "handle": c["handle"],
+            "name": c.get("name") or c["handle"],
+            "source": c.get("source"),
+            "why": (c.get("why_relevant") or "")[:160],
+            "evidence": [(e.get("description") or "")[:80] for e in (c.get("evidence") or [])[:2]],
+            "china_fit": (c.get("china_fit") or {}).get("level"),
+            "hireability": (c.get("hireability") or {}).get("level"),
+        })
+    system = (
+        "你在为'从问题出发的人才发现'写一段**给招聘方做决策用的导读**。下面给你企业难题和一份"
+        "**已筛选+核验过的候选名单**（每人含 handle、为何相关、证据、china_fit、可挖性）。\n\n"
+        "硬性要求：\n"
+        "- 只能用给你的候选信息；提到的每个人都必须用名单里出现过的 handle；**绝不编造任何人、"
+        "仓库或事实**，没依据就不写。\n"
+        "- 读者是接下来要去**接触人**的招聘方，要可执行、具体、不说空话套话。\n\n"
+        "产出三部分：\n"
+        "1) overview：2-4 句中文，讲清这批人大致分成哪几类、整体证据强弱（硬证据=可核验的代码贡献 / "
+        "软证据=观点影响力），像当面跟招人的人交代。\n"
+        "2) recommended_first：从名单里挑 2-3 个**最该先接触**的人，每人一句理由（结合相关性/证据/"
+        "可挖性/china_fit）。\n"
+        "3) groups：把候选按子方向/技术线分 2-4 组，每组一个简短中文标签 + 该组 handle 列表。\n\n"
+        '只输出 JSON：{"overview":"...","recommended_first":[{"handle":"...","reason":"..."}],'
+        '"groups":[{"label":"...","handles":["..."]}]}'
+    )
+    user = (f"难题：{problem}\n子问题：{', '.join(subproblems)}\n\n"
+            "候选名单（每行一个 JSON）：\n"
+            + "\n".join(json.dumps(it, ensure_ascii=False) for it in items))
+    try:
+        # 走更快的非思考模型；失败/异常优雅降级为无摘要
+        data = await _chat_json(system, user, max_tokens=2000, providers=config.LLM_REVIEW_PROVIDERS)
+    except Exception:  # noqa: BLE001
+        return None
+
+    valid = set(by_handle)
+    overview = (data.get("overview") or "").strip()[:600]
+    rec: List[Dict[str, Any]] = []
+    for r in (data.get("recommended_first") or []):
+        h = (r.get("handle") or "").strip()
+        if h in valid and h not in [x["handle"] for x in rec]:   # 防幻觉：handle 必须真实存在
+            rec.append({"handle": h, "name": by_handle[h].get("name") or h,
+                        "reason": (r.get("reason") or "")[:120]})
+    groups: List[Dict[str, Any]] = []
+    for g in (data.get("groups") or []):
+        hs = [h for h in (g.get("handles") or []) if h in valid]
+        label = (g.get("label") or "").strip()
+        if label and hs:
+            groups.append({"label": label[:24], "handles": hs})
+    if not overview and not rec:
+        return None
+    return {"overview": overview, "recommended_first": rec[:3], "groups": groups[:4]}
+
+
+# ─────────────────────────────────────────────────────────────
 # 启发式兜底（LLM 不可用时）
 # ─────────────────────────────────────────────────────────────
 _TECH_HINTS = ["rag", "向量", "vector", "检索", "延迟", "latency", "模型", "训练", "推理",

@@ -105,5 +105,6 @@ class SearchResult(BaseModel):
     subproblems: List[str]
     channel_reports: List[ChannelReport]
     candidates: List[Candidate]
+    summary: Optional[Dict[str, Any]] = None      # grounded 导读：overview/recommended_first/groups
     notes: List[str] = Field(default_factory=list)
     meta: Dict[str, Any] = Field(default_factory=dict)

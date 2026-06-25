@@ -167,6 +167,15 @@ async def run_pipeline(problem: str, china_first: bool = False) -> AsyncIterator
             all_cands.sort(key=lambda c: c.get("rank_score") or c.get("weighted_score", c["problem_fit_score"]), reverse=True)
             top = all_cands[:30]
 
+            # ── 阶段 4.5：结果导读（grounded 摘要，给招人方做决策；失败不影响主结果）──
+            summary = None
+            if top:
+                await queue.put(_event(type="status", stage=4, message="生成结果导读…"))
+                try:
+                    summary = await llm.summarize_results(problem, subproblems, top)
+                except Exception as e:  # noqa: BLE001
+                    trace.event("summary_failed", error=str(e)[:120])
+
             # 通道报告
             reports: List[ChannelReport] = []
             for ch in ("github", "x"):
@@ -211,6 +220,7 @@ async def run_pipeline(problem: str, china_first: bool = False) -> AsyncIterator
                 subproblems=subproblems,
                 channel_reports=reports,
                 candidates=[Candidate(**c) for c in top],
+                summary=summary,
                 notes=notes,
                 meta={
                     "elapsed_sec": trace.elapsed(),
